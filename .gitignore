@@ -1,0 +1,47 @@
+# Dependencias (bun install)
+node_modules/
+
+# Salidas de build
+out/
+dist/
+*.tgz
+*.exe
+*.bun-build
+
+# Cobertura de tests
+coverage/
+*.lcov
+
+# Logs
+logs/
+*.log
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# Variables de entorno
+.env
+.env.*
+
+# Caches
+.eslintcache
+.cache/
+*.tsbuildinfo
+
+# Configuración y cache de asu-cli si ASU_CLI_HOME apunta al repo
+.asu-cli/
+
+# .avs generados al probar la CLI en la raíz (los fixtures de tests/ sí se versionan)
+/*.avs
+
+# Editores
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.vs/
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Claude Code: ajustes locales
+.claude/settings.local.json

@@ -1,0 +1,4 @@
+* text=auto
+
+# Fixtures comparados byte a byte: git no debe tocar los finales de línea.
+tests/fixtures/** -text

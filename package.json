@@ -1,0 +1,28 @@
+{
+  "name": "asu-cli",
+  "version": "0.1.0",
+  "description": "CLI en español para tareas de traducción con subtítulos ASS.",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "asu": "src/cli.ts"
+  },
+  "scripts": {
+    "start": "bun src/cli.ts",
+    "test": "bun test",
+    "typecheck": "bun check"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/fontkit": "^2.0.9"
+  },
+  "peerDependencies": {
+    "typescript": "^7"
+  },
+  "dependencies": {
+    "@clack/core": "1.5.1",
+    "@clack/prompts": "^1.8.1",
+    "@fs-frost/asu": "npm:@jsr/fs-frost__asu@^1.15.0",
+    "fontkit": "^2.0.4"
+  }
+}
