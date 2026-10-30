@@ -3,6 +3,7 @@ import { basename } from "node:path";
 import { EXTENSIONES_ASS, listarArchivos } from "../nucleo/archivos.ts";
 import { generarAvsCompresion } from "../nucleo/avs.ts";
 import { buscarPreajuste, cargarConfig, type Preajuste } from "../nucleo/config.ts";
+import { nombreAvs } from "../nucleo/nombres.ts";
 import { ErrorUsuario, elegir, elegirVarios, esInteractivo } from "../ui.ts";
 import {
     codificarAvs,
@@ -12,10 +13,12 @@ import {
     resolverArchivosAss,
     resolverDestino,
     resolverDirectorio,
+    resolverSerieEpisodio,
     type OpcionesDestino,
+    type OpcionesSerieEpisodio,
 } from "./comun.ts";
 
-export type OpcionesAvsCompresion = OpcionesDestino & {
+export type OpcionesAvsCompresion = OpcionesDestino & OpcionesSerieEpisodio & {
     dir?: string;
     video?: string;
     preajuste?: string;
@@ -24,7 +27,7 @@ export type OpcionesAvsCompresion = OpcionesDestino & {
 };
 
 function describirPreajuste(preajuste: Preajuste): string {
-    return `${preajuste.ancho}x${preajuste.alto} → ${preajuste.archivo}.avs`;
+    return `${preajuste.ancho}x${preajuste.alto} → "<serie> <ep> ${preajuste.etiqueta}.avs"`;
 }
 
 async function elegirPreajuste(nombre: string | undefined): Promise<Preajuste> {
@@ -52,7 +55,8 @@ async function elegirPreajuste(nombre: string | undefined): Promise<Preajuste> {
     );
 }
 
-async function elegirSubtitulos(dir: string, subs: string[] | undefined): Promise<string[]> {
+/** Subtítulos indicados, o elegidos y ordenados en el menú; sin terminal, todos en orden alfabético. */
+export async function elegirSubtitulos(dir: string, subs: string[] | undefined): Promise<string[]> {
     if (subs !== undefined) {
         return resolverArchivosAss(dir, subs);
     }
@@ -80,6 +84,7 @@ export async function crearAvsCompresion(opciones: OpcionesAvsCompresion): Promi
     const video = await elegirVideo(dir, opciones.video);
     p.log.info(`Video: ${basename(video)}`);
 
+    const serieEpisodio = await resolverSerieEpisodio(dir, video, opciones);
     const preajuste = await elegirPreajuste(opciones.preajuste);
     p.log.info(`Preajuste: ${preajuste.nombre} (${describirPreajuste(preajuste)})`);
 
@@ -91,7 +96,7 @@ export async function crearAvsCompresion(opciones: OpcionesAvsCompresion): Promi
     }
 
     const bytes = codificarAvs(generarAvsCompresion(video, preajuste.ancho, preajuste.alto, subtitulos));
-    const destino = await resolverDestino(dir, preajuste.archivo, opciones);
+    const destino = await resolverDestino(dir, nombreAvs(serieEpisodio, preajuste.etiqueta), opciones);
     if (destino === null) {
         p.log.warn("No se creó el archivo.");
         return 1;

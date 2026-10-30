@@ -1,6 +1,6 @@
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 const COLORES = "&H00FFFFFF,&H000000FF,&H00000000,&H00000000";
 const RESTO_ESTILO = "0,0,0,0,100,100,0,0,1,2,2,2,10,10,10,1";
@@ -84,4 +84,10 @@ export function construirASS(opciones: {
 
 export function directorioTemporal(): string {
     return mkdtempSync(join(tmpdir(), "asu-cli-test-"));
+}
+
+/** Escribe un archivo creando las carpetas que falten (p. ej. `.asu\asu.json`). */
+export function escribirJson(ruta: string, texto: string): void {
+    mkdirSync(dirname(ruta), { recursive: true });
+    writeFileSync(ruta, texto);
 }

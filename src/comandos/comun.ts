@@ -2,6 +2,7 @@ import * as p from "@clack/prompts";
 import { existsSync, statSync, writeFileSync } from "node:fs";
 import { basename, extname, isAbsolute, join, resolve } from "node:path";
 import { EXTENSIONES_ASS, EXTENSIONES_VIDEO, conExtension, listarArchivos, validarNombreArchivo } from "../nucleo/archivos.ts";
+import { deducirSerieEpisodio, normalizarEpisodio, type SerieEpisodio } from "../nucleo/nombres.ts";
 import { caracteresFuera1252, codificarWindows1252 } from "../nucleo/windows1252.ts";
 import { ErrorUsuario, elegir, esInteractivo, ordenarLista, preguntarTexto } from "../ui.ts";
 
@@ -56,6 +57,63 @@ export type OpcionesDestino = {
     forzar?: boolean;
     salida?: string;
 };
+
+export type OpcionesSerieEpisodio = {
+    serie?: string;
+    episodio?: string;
+};
+
+/**
+ * Serie y episodio: de los argumentos, o deducidos del raw (o de las carpetas). En el menú se
+ * muestran como sugerencia editable; sin terminal, si no se pueden deducir, es un error.
+ */
+export async function resolverSerieEpisodio(
+    dir: string,
+    video: string,
+    opciones: OpcionesSerieEpisodio,
+    extras: {
+        /** Valores iniciales en el menú (y por defecto sin terminal), antes que lo deducido. */
+        sugerido?: Partial<SerieEpisodio>;
+        /** Se llama apenas se confirma cada respuesta en el menú. */
+        alConfirmar?: (cambio: Partial<SerieEpisodio>) => void;
+    } = {},
+): Promise<SerieEpisodio> {
+    const deducido = deducirSerieEpisodio(video, dir);
+    let serie = opciones.serie ?? extras.sugerido?.serie ?? deducido?.serie;
+    let episodio = opciones.episodio ?? extras.sugerido?.episodio ?? deducido?.episodio;
+
+    if (esInteractivo()) {
+        if (opciones.serie === undefined) {
+            serie = (await preguntarTexto("Serie", { inicial: serie, validar: validarNombreArchivo })).trim();
+            extras.alConfirmar?.({ serie });
+        }
+        if (opciones.episodio === undefined) {
+            episodio = await preguntarTexto("Episodio", {
+                inicial: episodio,
+                validar: (valor) => (normalizarEpisodio(valor) ? undefined : "El episodio debe ser un número."),
+            });
+            extras.alConfirmar?.({ episodio: normalizarEpisodio(episodio) ?? episodio });
+        }
+    }
+
+    if (serie === undefined || episodio === undefined) {
+        throw new ErrorUsuario(
+            `No se pudo deducir la serie y el episodio de "${basename(video)}" ni de las carpetas. Indícalos con --serie y --episodio.`,
+        );
+    }
+
+    const errorSerie = validarNombreArchivo(serie);
+    if (errorSerie) {
+        throw new ErrorUsuario(`Serie: ${errorSerie}`);
+    }
+
+    const normalizado = normalizarEpisodio(episodio);
+    if (normalizado === null) {
+        throw new ErrorUsuario(`Episodio inválido: "${episodio}". Debe ser un número.`);
+    }
+
+    return { serie: serie.trim(), episodio: normalizado };
+}
 
 /** Rutas de .ass indicadas por argumento (relativas a `dir`), validando que existan, sean .ass y no se repitan. */
 export function resolverArchivosAss(dir: string, archivos: readonly string[]): string[] {

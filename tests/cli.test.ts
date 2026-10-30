@@ -83,32 +83,35 @@ describe("asu avs-trabajo", () => {
     });
 });
 
+/** Raw con el formato habitual: serie y episodio se deducen del nombre. */
+const RAW = "[Grupo] Serie de Prueba - 01 [1080p][ABCD1234].mkv";
+
 describe("asu avs-compresion", () => {
     test("usa el preajuste y los subs en el orden indicado", () => {
-        writeFileSync(join(dir, "video.mkv"), "");
+        writeFileSync(join(dir, RAW), "");
         writeFileSync(join(dir, "a.ass"), "");
         writeFileSync(join(dir, "b.ass"), "");
 
         const { codigo } = asu("avs-compresion", dir, "-p", "720p", "-s", "b.ass", "-s", "a.ass");
         expect(codigo).toBe(0);
 
-        const avs = readFileSync(join(dir, "MP4-720p.avs"), "latin1");
+        const avs = readFileSync(join(dir, "Serie de Prueba 01 MP4 720.avs"), "latin1");
         expect(avs).toContain("spline64Resize(1280,720)");
         expect(avs.indexOf("b.ass")).toBeLessThan(avs.indexOf("a.ass"));
     });
 
     test("sin --subs ni terminal usa todos los .ass en orden alfabético", () => {
-        writeFileSync(join(dir, "video.mkv"), "");
+        writeFileSync(join(dir, RAW), "");
         writeFileSync(join(dir, "z.ass"), "");
         writeFileSync(join(dir, "m.ass"), "");
 
         expect(asu("avs-compresion", dir, "-p", "396p").codigo).toBe(0);
-        const avs = readFileSync(join(dir, "AVI.avs"), "latin1");
+        const avs = readFileSync(join(dir, "Serie de Prueba 01 AVI.avs"), "latin1");
         expect(avs.indexOf("m.ass")).toBeLessThan(avs.indexOf("z.ass"));
     });
 
     test("preajuste inexistente es un error", () => {
-        writeFileSync(join(dir, "video.mkv"), "");
+        writeFileSync(join(dir, RAW), "");
         expect(asu("avs-compresion", dir, "-p", "4k").codigo).toBe(1);
     });
 });
@@ -139,12 +142,12 @@ describe("asu fuentes", () => {
 
 describe("asu config", () => {
     test("agregar, usar y quitar un preajuste", () => {
-        expect(asu("config", "preajustes", "agregar", "900p", "1600x900", "--archivo", "MP4-900p").codigo).toBe(0);
+        expect(asu("config", "preajustes", "agregar", "900p", "1600x900", "--etiqueta", "MP4 900").codigo).toBe(0);
         expect(asu("config", "preajustes").salida).toContain("1600x900");
 
-        writeFileSync(join(dir, "video.mkv"), "");
+        writeFileSync(join(dir, RAW), "");
         expect(asu("avs-compresion", dir, "-p", "900p").codigo).toBe(0);
-        expect(existsSync(join(dir, "MP4-900p.avs"))).toBe(true);
+        expect(existsSync(join(dir, "Serie de Prueba 01 MP4 900.avs"))).toBe(true);
 
         expect(asu("config", "preajustes", "quitar", "900p").codigo).toBe(0);
         expect(asu("config", "preajustes").salida).not.toContain("1600x900");

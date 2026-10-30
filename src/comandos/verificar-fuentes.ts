@@ -1,6 +1,6 @@
 import * as p from "@clack/prompts";
 import { readFileSync } from "node:fs";
-import { basename } from "node:path";
+import { basename, dirname } from "node:path";
 import { decodificarAdjunto } from "../nucleo/adjuntos-ass.ts";
 import { EXTENSIONES_ASS, EXTENSIONES_FUENTE, listarArchivos } from "../nucleo/archivos.ts";
 import { rutaCacheFuentes } from "../nucleo/config.ts";
@@ -27,6 +27,48 @@ function fuentesIncrustadas(ass: ASSFile): Set<string> {
     }
 
     return nombres;
+}
+
+export type RevisionFuentes = {
+    /** Archivo → fuentes faltantes (solo los que tienen alguna). */
+    faltantes: Map<string, string[]>;
+    /** Archivos que no se pudieron leer. */
+    errores: string[];
+};
+
+/**
+ * Fuentes faltantes de una lista de .ass (de cualquier carpeta). Disponibles: instaladas,
+ * sueltas junto a cada .ass e incrustadas en él. No muestra nada.
+ */
+export function revisarFuentes(rutas: readonly string[]): RevisionFuentes {
+    const resultado: RevisionFuentes = { faltantes: new Map(), errores: [] };
+    if (rutas.length === 0) {
+        return resultado;
+    }
+
+    const instaladas = obtenerFuentesInstaladas(rutaCacheFuentes());
+    const localesPorDir = new Map<string, Set<string>>();
+
+    for (const ruta of rutas) {
+        const ass = leerASS(readFileSync(ruta, "utf8"));
+        if (ass === null) {
+            resultado.errores.push(ruta);
+            continue;
+        }
+
+        const dir = dirname(ruta);
+        if (!localesPorDir.has(dir)) {
+            localesPorDir.set(dir, nombresDeArchivosFuente(listarArchivos(dir, EXTENSIONES_FUENTE)));
+        }
+
+        const disponibles = new Set([...instaladas, ...localesPorDir.get(dir)!, ...fuentesIncrustadas(ass)]);
+        const faltantes = fuentesFaltantes(fuentesUsadas(ass), disponibles);
+        if (faltantes.length > 0) {
+            resultado.faltantes.set(ruta, faltantes);
+        }
+    }
+
+    return resultado;
 }
 
 /**

@@ -19,7 +19,7 @@ describe("generarAvsCompresion", () => {
         const avs = generarAvsCompresion("C:\\raw\\video.mkv", 1280, 720, ["C:\\raw\\b.ass", "C:\\raw\\a.ass"]);
 
         expect(avs).toBe(
-            'FFVideoSource("C:\\raw\\video.mkv", threads=1, fpsnum=24000, fpsden=1001, colorspace="YV12")\r\n' +
+            'FFVideoSource("C:\\raw\\video.mkv", threads=-1, fpsnum=24000, fpsden=1001, colorspace="YV12")\r\n' +
             "spline64Resize(1280,720)\r\n" +
             'textsub("C:\\raw\\b.ass")\r\n' +
             'textsub("C:\\raw\\a.ass")\r\n',

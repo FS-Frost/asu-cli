@@ -13,6 +13,11 @@ export class Cancelado extends Error {
 
 /** Hay terminal para preguntar. Sin ella, todo dato faltante es un error. */
 export function esInteractivo(): boolean {
+    // Solo para tests: fuerza el modo sin terminal aunque `bun test` corra en una.
+    if (process.env.ASU_CLI_NO_INTERACTIVO) {
+        return false;
+    }
+
     return Boolean(process.stdin.isTTY && process.stdout.isTTY);
 }
 
@@ -68,5 +73,5 @@ export async function ordenarLista<T>(mensaje: string, elementos: ElementoLista<
 }
 
 export async function confirmar(mensaje: string, inicial = true): Promise<boolean> {
-    return sinCancelar(await p.confirm({ message: mensaje, initialValue: inicial }));
+    return sinCancelar(await p.confirm({ message: mensaje, initialValue: inicial, active: "Sí", inactive: "No" }));
 }
