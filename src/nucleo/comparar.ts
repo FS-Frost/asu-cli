@@ -77,6 +77,30 @@ export type EstadisticaFrame = {
 /** Filtro de análisis: baja resolución, luminancia, movimiento y entropía por frame. */
 export const FILTRO_ANALISIS = "scale=480:-2,signalstats,entropy,metadata=mode=print";
 
+/**
+ * Último `pts_time` completo de un trozo de la salida del análisis (para el avance), o null.
+ * Un número cortado al final del trozo se ignora: el trozo siguiente trae otro.
+ */
+export function ultimoPtsTime(trozo: string): number | null {
+    let ultimo: number | null = null;
+    for (const coincidencia of trozo.matchAll(/pts_time:(-?[\d.]+)\s/g)) {
+        ultimo = Number(coincidencia[1]);
+    }
+    return ultimo !== null && Number.isFinite(ultimo) ? ultimo : null;
+}
+
+/** "42 % (09:48 de 23:20, ×11, faltan ~01:15)": avance de un proceso que recorre `total` segundos de video. */
+export function textoAvance(procesado: number, total: number, transcurrido: number): string {
+    const hecho = Math.min(Math.max(procesado, 0), total);
+    const porcentaje = total > 0 ? Math.floor((hecho / total) * 100) : 0;
+    const velocidad = transcurrido > 0 ? hecho / transcurrido : 0;
+    const detalle = [`${formatearTiempo(hecho)} de ${formatearTiempo(total)}`];
+    if (velocidad > 0) {
+        detalle.push(`×${velocidad >= 10 ? Math.round(velocidad) : velocidad.toFixed(1)}`, `faltan ~${formatearTiempo((total - hecho) / velocidad)}`);
+    }
+    return `${porcentaje} % (${detalle.join(", ")})`;
+}
+
 /** Estadísticas por frame de `metadata=print` (stderr de ffmpeg con FILTRO_ANALISIS). */
 export function parsearAnalisis(salida: string): EstadisticaFrame[] {
     const frames: EstadisticaFrame[] = [];

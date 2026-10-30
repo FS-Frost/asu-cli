@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { abrirComparacion, comparar, type OpcionesComparar } from "../src/comandos/comparar.ts";
+import { abrirComparacion, comparar, resumenComparacion, type OpcionesComparar } from "../src/comandos/comparar.ts";
 import type { Ejecutor } from "../src/ejecutor.ts";
 import {
     buscarCrfIgualado,
@@ -17,8 +17,10 @@ import {
     parsearSsimPorFrame,
     parsearTiempo,
     parsearTramo,
+    textoAvance,
     tramosPorContenido,
     tramosPorDefecto,
+    ultimoPtsTime,
     type EstadisticaFrame,
 } from "../src/nucleo/comparar.ts";
 import { generarPagina } from "../src/nucleo/comparar-pagina.ts";
@@ -88,6 +90,18 @@ describe("tramos por contenido", () => {
             { t: 0.017, luma: 149.147, movimiento: 0, detalle: 0.900498 },
             { t: 0.058, luma: 160.572, movimiento: 54.6165, detalle: 0.86921 },
         ]);
+    });
+
+    test("avance: último pts_time completo del trozo y texto con %, velocidad y lo que falta", () => {
+        expect(ultimoPtsTime("frame:0 pts:17 pts_time:0.017\nlavfi.x=1\nframe:1 pts:58 pts_time:61.5\n")).toBe(61.5);
+        // El último número puede venir cortado: se usa el anterior.
+        expect(ultimoPtsTime("frame:0 pts:17 pts_time:10.5\nframe:1 pts:58 pts_time:1")).toBe(10.5);
+        expect(ultimoPtsTime("lavfi.signalstats.YAVG=149.147\n")).toBeNull();
+
+        expect(textoAvance(588, 1400, 50)).toBe("42 % (09:48 de 23:20, ×12, faltan ~01:09)");
+        expect(textoAvance(10, 1400, 4)).toBe("0 % (00:10 de 23:20, ×2.5, faltan ~09:16)");
+        expect(textoAvance(0, 1400, 0)).toBe("0 % (00:00 de 23:20)");
+        expect(textoAvance(1500, 1400, 100)).toStartWith("100 %");
     });
 
     test("elige el más oscuro (sin contar negros), el de más movimiento y el de más detalle, sin superponerse", () => {
@@ -238,6 +252,13 @@ describe("generarPagina", () => {
         expect(datos).not.toContain("<");
         expect(JSON.parse(datos).episodio.serie).toBe("Serie <prueba>");
         expect(html).toContain("A ciegas");
+    });
+
+    test("pantalla completa de la sección (tecla F) y lo secundario oculto en ella", () => {
+        expect(html).toContain('getElementById("vista-" + pestana).requestFullscreen()');
+        expect(html).toContain("main section:fullscreen .solo-ventana { display: none !important; }");
+        expect(html).toContain("miniaturas solo-ventana");
+        expect(html).toContain("adoptar solo-ventana");
     });
 
     test("los scripts son JavaScript válido", () => {
@@ -402,6 +423,65 @@ describe("asu comparar (ejecutor falso)", () => {
         expect(x264Con("--output").length).toBeGreaterThan(0);
     });
 
+    test("registro.log en la carpeta de la comparación; las codificaciones con vigilante", async () => {
+        const vigiladas: string[] = [];
+        const base = falso.ejecutor;
+        falso.ejecutor = { ejecutar: (comandos, opciones) => {
+            if (opciones?.vigilar) vigiladas.push(comandos.map(linea).join(" | "));
+            return base.ejecutar(comandos, opciones);
+        } };
+
+        expect(await correr({ tramosFijos: true, variantes: ["anime"] })).toBe(0);
+        const texto = readFileSync(join(comparaciones()[0]!, "registro.log"), "utf8");
+        expect(texto).toContain("asu comparar");
+        expect(texto).toContain("Variante anime:");
+        expect(texto).toContain("x264.exe");
+        expect(texto).toContain("Terminado (código 0).");
+        expect(vigiladas.length).toBeGreaterThan(0);
+        expect(vigiladas.every((l) => l.includes("x264.exe"))).toBe(true);
+    });
+
+    test("x264 colgado: se reintenta una vez; dos veces es error con la ruta del registro", async () => {
+        const base = falso.ejecutor;
+        let cuelgues = 1;
+        falso.ejecutor = { ejecutar: (comandos, opciones) => {
+            if (cuelgues > 0 && comandos.some((c) => c.exe === h.x264)) {
+                cuelgues--;
+                return Promise.resolve({ codigo: -1, stderr: "", colgado: { vivos: ["x264.exe"] } });
+            }
+            return base.ejecutar(comandos, opciones);
+        } };
+
+        expect(await correr({ tramosFijos: true, variantes: ["anime"] })).toBe(0);
+        expect(readFileSync(join(comparaciones()[0]!, "registro.log"), "utf8")).toContain("se reintenta una vez");
+
+        cuelgues = 2;
+        const error = (await correr({ tramosFijos: true, variantes: ["anime"], sinCache: true, paralelo: "1" }).catch((e: unknown) => e)) as Error;
+        expect(error.message).toContain("se colgó dos veces");
+        expect(error.message).toMatch(/Registro: .+registro\.log$/);
+    });
+
+    test("análisis con vigilante: un cuelgue se reintenta y los tramos salen igual", async () => {
+        const base = falso.ejecutor;
+        let cuelgues = 1;
+        let vigilado = false;
+        falso.ejecutor = { ejecutar: (comandos, opciones) => {
+            const esAnalisis = comandos.some((c) => c.args.some((a) => a.includes("metadata=mode=print")));
+            if (esAnalisis) {
+                vigilado = opciones?.vigilar !== undefined;
+                if (cuelgues-- > 0) {
+                    return Promise.resolve({ codigo: -1, stderr: "", colgado: { vivos: ["ffmpeg.exe"] } });
+                }
+            }
+            return base.ejecutar(comandos, opciones);
+        } };
+
+        expect(await correr({ variantes: ["anime"] })).toBe(0);
+        expect(vigilado).toBe(true);
+        expect(resultados().tramos.map((t) => t.motivo)).toEqual(["oscuro", "movimiento", "detalle"]);
+        expect(readFileSync(join(comparaciones()[0]!, "registro.log"), "utf8")).toContain('"análisis del episodio" se colgó');
+    });
+
     test("--tramo manual y errores", async () => {
         expect(await correr({ tramos: ["01:00-01:10"], variantes: ["intermedia"] })).toBe(0);
         expect(resultados().tramos).toEqual([{ indice: 1, inicio: 60, duracion: 10, motivo: "manual" }]);
@@ -410,6 +490,12 @@ describe("asu comparar (ejecutor falso)", () => {
         await expect(correr({ variantes: ["nada"] })).rejects.toThrow("nada");
         await expect(correr({ salida: "396" })).rejects.toThrow("mp4-x264");
         await expect(correr({ igualar: "tamaño" })).rejects.toThrow("--igualar");
+    });
+
+    test("resumenComparacion (menú): versión, variantes, tramos y votos; ilegible si falta el json", async () => {
+        await correr({ tramosFijos: true, variantes: ["anime"] });
+        expect(resumenComparacion(comparaciones()[0]!)).toBe("MP4 1080 · actual, anime · 3 tramos · 0 votos");
+        expect(resumenComparacion(join(base, "no-existe"))).toBe("resultados.json ilegible");
     });
 
     test("asu comparar abrir: sirve la última comparación y regenera la página", async () => {

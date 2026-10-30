@@ -1,4 +1,5 @@
 import * as p from "@clack/prompts";
+import { basename, join } from "node:path";
 import { crearAvsCompresion } from "./comandos/avs-compresion.ts";
 import { crearAvsTrabajo } from "./comandos/avs-trabajo.ts";
 import {
@@ -16,7 +17,7 @@ import {
     restablecerConfig,
     usarVarianteComando,
 } from "./comandos/config.ts";
-import { comparar } from "./comandos/comparar.ts";
+import { CARPETA_COMPARACIONES, abrirComparacion, comparar, listarComparaciones, resumenComparacion } from "./comandos/comparar.ts";
 import { corregirOffset } from "./comandos/corregir-offset.ts";
 import { encode } from "./comandos/encode.ts";
 import { reescalarArchivos } from "./comandos/reescalar.ts";
@@ -155,6 +156,39 @@ async function menuConfig(): Promise<void> {
     }
 }
 
+/** Submenú de comparar: nueva comparación o abrir una hecha. También es `asu comparar` sin argumentos, con terminal. */
+export async function menuComparar(): Promise<number> {
+    const { carpetaSalida } = cargarConfig();
+    const existentes = carpetaSalida ? listarComparaciones(carpetaSalida) : [];
+    const accion = await elegir<"nueva" | "abrir" | "volver">("Comparar ajustes de x264", [
+        { value: "nueva", label: "Nueva comparación", hint: "episodio de esta carpeta" },
+        { value: "abrir", label: "Abrir una comparación", hint: existentes.length > 0 ? `${existentes.length}, la más reciente primero` : "no hay" },
+        { value: "volver", label: "Volver" },
+    ]);
+
+    switch (accion) {
+        case "nueva":
+            return comparar({});
+
+        case "abrir": {
+            if (existentes.length === 0) {
+                p.log.warn(carpetaSalida
+                    ? `No hay comparaciones en ${join(carpetaSalida, CARPETA_COMPARACIONES)}.`
+                    : "No hay carpeta de salida configurada (Configuración → Carpeta de salida del encode).");
+                return 1;
+            }
+            const carpeta = await elegir(
+                "Comparación",
+                existentes.map((ruta) => ({ value: ruta, label: basename(ruta), hint: resumenComparacion(ruta) })),
+            );
+            return abrirComparacion({ carpeta });
+        }
+
+        case "volver":
+            return 0;
+    }
+}
+
 async function ejecutarAccion(accion: Exclude<Accion, "salir">): Promise<void> {
     switch (accion) {
         case "avs-trabajo":
@@ -179,7 +213,7 @@ async function ejecutarAccion(accion: Exclude<Accion, "salir">): Promise<void> {
             await encode({});
             break;
         case "comparar":
-            await comparar({});
+            await menuComparar();
             break;
         case "config":
             await menuConfig();

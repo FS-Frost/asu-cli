@@ -18,8 +18,10 @@ import {
     parsearSsimPorFrame,
     parsearTramo,
     promedio,
+    textoAvance,
     tramosPorContenido,
     tramosPorDefecto,
+    ultimoPtsTime,
     type Tramo,
     type TramoElegido,
 } from "../nucleo/comparar.ts";
@@ -38,6 +40,7 @@ import {
 } from "../nucleo/config.ts";
 import { argumentosTramo, comandoInfo, comandoMp4Video, comandosX264, herramientasDeMegui, parsearDuracion, type Comando, type Herramientas } from "../nucleo/encode.ts";
 import { PanelAvance } from "../panel-avance.ts";
+import { Registro, anotarError, ejecutarVigilado, ejecutorConRegistro } from "../registro.ts";
 import { servirComparacion, type OpcionesServidor } from "../servidor-comparacion.ts";
 import { ErrorUsuario, elegir, elegirVarios, esInteractivo } from "../ui.ts";
 import { elegirVideo, resolverDirectorio, resolverSerieEpisodio, type OpcionesSerieEpisodio } from "./comun.ts";
@@ -82,6 +85,7 @@ export type DependenciasComparar = {
 export const CAPTURAS_POR_TRAMO = 4;
 export const CARPETA_COMPARACIONES = "Comparaciones";
 export const CARPETA_CACHE = ".cache";
+export const NOMBRE_REGISTRO = "registro.log";
 const REFERENCIA = "actual";
 
 // ---- Elecciones ----
@@ -199,20 +203,36 @@ type Contexto = {
     sinCache: boolean;
     clips: string;
     panel: PanelAvance;
+    registro: Registro;
 };
 
-/** Ejecuta y devuelve los frames que informó la herramienta y los segundos que tardó. */
-async function correr(ctx: Contexto, comandos: Comando[], descripcion: string, esperado: string, fila?: string): Promise<{ frames: number | null; segundos: number }> {
+/**
+ * Ejecuta y devuelve los frames que informó la herramienta y los segundos que tardó. Con `vigilar`
+ * (las codificaciones), un cuelgue se reintenta una vez.
+ */
+async function correr(
+    ctx: Contexto,
+    comandos: Comando[],
+    descripcion: string,
+    esperado: string,
+    { fila, vigilar = false }: { fila?: string; vigilar?: boolean } = {},
+): Promise<{ frames: number | null; segundos: number }> {
     const lector = new LectorAvance();
-    const inicio = Date.now();
-    const { codigo, stderr } = await ctx.ejecutor.ejecutar(comandos, {
-        alSalida: (texto) => {
+    let inicio = Date.now();
+    const opciones = {
+        alSalida: (texto: string) => {
             lector.leer(texto);
             if (fila && lector.frames !== null) {
                 ctx.panel.frames(fila, lector.frames);
             }
         },
-    });
+    };
+    const { codigo, stderr } = vigilar
+        ? await ejecutarVigilado(ctx.ejecutor, comandos, opciones, descripcion, ({ vivos }) => {
+            ctx.registro.escribir(`"${descripcion}" se colgó (vivos: ${vivos.join(", ") || "ninguno"}); se reintenta una vez.`);
+            inicio = Date.now();
+        })
+        : await ctx.ejecutor.ejecutar(comandos, opciones);
 
     if (codigo !== 0 || !existsSync(esperado)) {
         const detalle = ultimasLineas(stderr);
@@ -250,14 +270,14 @@ async function codificarConCache(ctx: Contexto, x264: AjustesX264, tramo: Tramo,
     mkdirSync(dir, { recursive: true });
     let medida: { frames: number | null; segundos: number };
     if (objetivo.tipo === "crf") {
-        medida = await correr(ctx, comandosX264(ctx.h, ctx.avs, { ...x264, crf: objetivo.valor }, video264, { tramo }), descripcion, video264, fila);
+        medida = await correr(ctx, comandosX264(ctx.h, ctx.avs, { ...x264, crf: objetivo.valor }, video264, { tramo }), descripcion, video264, { fila, vigilar: true });
     } else {
         const stats = join(dir, "x264.stats");
         const pasada1 = join(dir, "pasada1.264");
         ctx.panel.paso(fila, `${descripcion} · 1.ª pasada`);
-        await correr(ctx, comandosX264(ctx.h, ctx.avs, x264, pasada1, { tramo, pasada: { numero: 1, bitrate: objetivo.valor, stats } }), `${descripcion} (1.ª pasada)`, pasada1, fila);
+        await correr(ctx, comandosX264(ctx.h, ctx.avs, x264, pasada1, { tramo, pasada: { numero: 1, bitrate: objetivo.valor, stats } }), `${descripcion} (1.ª pasada)`, pasada1, { fila, vigilar: true });
         ctx.panel.paso(fila, `${descripcion} · 2.ª pasada`);
-        medida = await correr(ctx, comandosX264(ctx.h, ctx.avs, x264, video264, { tramo, pasada: { numero: 2, bitrate: objetivo.valor, stats } }), `${descripcion} (2.ª pasada)`, video264, fila);
+        medida = await correr(ctx, comandosX264(ctx.h, ctx.avs, x264, video264, { tramo, pasada: { numero: 2, bitrate: objetivo.valor, stats } }), `${descripcion} (2.ª pasada)`, video264, { fila, vigilar: true });
         rmSync(pasada1, { force: true });
     }
 
@@ -370,14 +390,56 @@ async function medir(ctx: Contexto, clip: string, tramo: Tramo): Promise<{ ssimP
     return { ssimPorFrame: parsearSsimPorFrame(stdout ?? ""), ssim: parsearSsim(stderr), psnr: parsearPsnr(stderr) };
 }
 
-/** Tramos por contenido: ffmpeg analiza el raw completo a baja resolución. */
-async function analizarContenido(ejecutor: Ejecutor, h: Herramientas, raw: string, duracionTotal: number): Promise<TramoElegido[]> {
-    p.log.step("Analizando el episodio para elegir tramos (oscuro, movimiento, detalle)...");
-    const { stderr } = await ejecutor.ejecutar(
-        [{ exe: h.ffmpeg, args: ["-hide_banner", "-nostdin", "-nostats", "-i", raw, "-an", "-sn", "-vf", FILTRO_ANALISIS, "-f", "null", "-"] }],
-        { capturar: true },
-    );
-    return tramosPorContenido(parsearAnalisis(stderr), duracionTotal);
+/**
+ * Tramos por contenido: ffmpeg analiza el raw completo a baja resolución. El avance sale del
+ * `pts_time` de cada frame que imprime el filtro; con vigilante (un cuelgue se reintenta una vez).
+ */
+async function analizarContenido(ejecutor: Ejecutor, registro: Registro, h: Herramientas, raw: string, duracionTotal: number): Promise<TramoElegido[]> {
+    const titulo = "Analizando el episodio para elegir tramos (oscuro, movimiento, detalle)";
+    const descripcion = "análisis del episodio";
+    const spinner = esInteractivo() ? p.spinner() : null;
+    if (spinner) {
+        spinner.start(`${titulo}...`);
+    } else {
+        p.log.step(`${titulo}...`);
+    }
+
+    let inicio = Date.now();
+    let ultimaActualizacion = 0;
+    const comandos = [{ exe: h.ffmpeg, args: ["-hide_banner", "-nostdin", "-nostats", "-i", raw, "-an", "-sn", "-vf", FILTRO_ANALISIS, "-f", "null", "-"] }];
+    try {
+        const { codigo, stderr } = await ejecutarVigilado(
+            ejecutor,
+            comandos,
+            {
+                capturar: true,
+                alSalida: (trozo) => {
+                    const ahora = Date.now();
+                    const segundo = spinner && ahora - ultimaActualizacion >= 500 ? ultimoPtsTime(trozo) : null;
+                    if (segundo !== null) {
+                        ultimaActualizacion = ahora;
+                        spinner!.message(`${titulo}: ${textoAvance(segundo, duracionTotal, (ahora - inicio) / 1000)}`);
+                    }
+                },
+            },
+            descripcion,
+            ({ vivos }) => {
+                registro.escribir(`"${descripcion}" se colgó (vivos: ${vivos.join(", ") || "ninguno"}); se reintenta una vez.`);
+                spinner?.message(`${titulo}: se colgó, reintentando...`);
+                inicio = Date.now();
+            },
+        );
+        if (codigo !== 0) {
+            const detalle = ultimasLineas(stderr);
+            throw new ErrorUsuario(`Falló "${descripcion}" (código ${codigo}).${detalle ? `\n${detalle}` : ""}`);
+        }
+
+        spinner?.stop(`Episodio analizado en ${formatearTiempo((Date.now() - inicio) / 1000)}`);
+        return tramosPorContenido(parsearAnalisis(stderr), duracionTotal);
+    } catch (error) {
+        spinner?.error(`${titulo}: falló`);
+        throw error;
+    }
 }
 
 function describirTramo(tramo: TramoElegido): string {
@@ -393,7 +455,19 @@ function describirTramo(tramo: TramoElegido): string {
  * y deja resultados.json + una página. Al terminar la sirve en un servidor local y abre el navegador.
  */
 export async function comparar(opciones: OpcionesComparar, dependencias: DependenciasComparar = {}): Promise<number> {
-    const ejecutor = dependencias.ejecutor ?? ejecutorReal;
+    let registro: Registro | undefined;
+    try {
+        const codigo = await compararConRegistro(opciones, dependencias, (r) => (registro = r));
+        registro?.escribir(`Terminado (código ${codigo}).`);
+        return codigo;
+    } catch (error) {
+        throw anotarError(registro, error);
+    }
+}
+
+/** El registro se crea con la carpeta de la comparación (`alRegistro`), antes de leer el .avs. */
+async function compararConRegistro(opciones: OpcionesComparar, dependencias: DependenciasComparar, alRegistro: (registro: Registro) => void): Promise<number> {
+    const ejecutorBase = dependencias.ejecutor ?? ejecutorReal;
     const dir = resolverDirectorio(opciones.dir);
     p.log.info(`Directorio: ${dir}`);
 
@@ -421,6 +495,28 @@ export async function comparar(opciones: OpcionesComparar, dependencias: Depende
     const { avs: rutasAvs } = await prepararAvs(dir, video, serieEpisodio, [salida], config, { subs: opciones.subs }, recuerdo);
     const avs = rutasAvs.get(salida)!;
 
+    const comparaciones = join(carpetaSalida, CARPETA_COMPARACIONES);
+    const nombreBase = `${serieEpisodio.serie} - ${serieEpisodio.episodio} - ${marcaDeTiempo(new Date())}`;
+    let carpeta = join(comparaciones, nombreBase);
+    for (let n = 2; existsSync(carpeta); n++) {
+        carpeta = join(comparaciones, `${nombreBase} (${n})`);
+    }
+    const registro = new Registro(join(carpeta, NOMBRE_REGISTRO), "asu comparar");
+    alRegistro(registro);
+    registro.escribir(
+        [
+            `Episodio: ${dir}`,
+            `Raw: ${video}`,
+            `AVS: ${avs}`,
+            `Opciones: ${JSON.stringify(opciones)}`,
+            `Salida ${salida.nombre}: ${JSON.stringify(salida.x264)}`,
+            ...variantes.map((v) => `Variante ${v.nombre}: ${JSON.stringify(v.x264)}`),
+            `Igualación: ${modo} · paralelo: ${limite}`,
+        ].join("\n"),
+    );
+    p.log.info(`Registro: ${registro.ruta}`);
+    const ejecutor = ejecutorConRegistro(ejecutorBase, registro);
+
     const info = await ejecutor.ejecutar([comandoInfo(h, avs)], { capturar: true });
     const duracionTotal = parsearDuracion(info.stderr);
     if (!duracionTotal) {
@@ -431,15 +527,10 @@ export async function comparar(opciones: OpcionesComparar, dependencias: Depende
         ? tramosManuales(opciones.tramos, duracionTotal)
         : opciones.tramosFijos
             ? tramosPorDefecto(duracionTotal).map((t) => ({ ...t, motivo: "fijo" as const }))
-            : await analizarContenido(ejecutor, h, video, duracionTotal);
+            : await analizarContenido(ejecutor, registro, h, video, duracionTotal);
     p.log.info(`Tramos: ${tramos.map(describirTramo).join(", ")}`);
+    registro.escribir(`Tramos: ${tramos.map(describirTramo).join(", ")}`);
 
-    const comparaciones = join(carpetaSalida, CARPETA_COMPARACIONES);
-    const nombreBase = `${serieEpisodio.serie} - ${serieEpisodio.episodio} - ${marcaDeTiempo(new Date())}`;
-    let carpeta = join(comparaciones, nombreBase);
-    for (let n = 2; existsSync(carpeta); n++) {
-        carpeta = join(comparaciones, `${nombreBase} (${n})`);
-    }
     const { size, mtimeMs } = statSync(avs);
     const ctx: Contexto = {
         ejecutor,
@@ -451,6 +542,7 @@ export async function comparar(opciones: OpcionesComparar, dependencias: Depende
         sinCache: opciones.sinCache ?? false,
         clips: join(carpeta, "clips"),
         panel: new PanelAvance(variantes.map((v) => v.nombre)),
+        registro,
     };
     const dirCapturas = join(carpeta, "capturas");
     for (const ruta of [ctx.cache, ctx.clips, dirCapturas]) {
@@ -612,6 +704,17 @@ export function listarComparaciones(carpetaSalida: string): string[] {
         .filter((e) => e.isDirectory() && e.name !== CARPETA_CACHE && existsSync(join(comparaciones, e.name, NOMBRE_RESULTADOS)))
         .map((e) => join(comparaciones, e.name))
         .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs);
+}
+
+/** Resumen de una comparación para elegirla en el menú: variantes, tramos, capturas y votos. */
+export function resumenComparacion(carpeta: string): string {
+    try {
+        const r = JSON.parse(readFileSync(join(carpeta, NOMBRE_RESULTADOS), "utf8")) as Resultados;
+        const votos = r.votos.length === 1 ? "1 voto" : `${r.votos.length} votos`;
+        return `${r.salida.etiqueta} · ${r.variantes.map((v) => v.nombre).join(", ")} · ${r.tramos.length} tramos · ${votos}`;
+    } catch {
+        return `${NOMBRE_RESULTADOS} ilegible`;
+    }
 }
 
 /** `asu comparar abrir [carpeta]`: sirve una comparación existente (por defecto, la última). */

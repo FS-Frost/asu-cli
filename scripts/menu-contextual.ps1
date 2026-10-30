@@ -7,15 +7,15 @@
       Directory\shell\Asu             clic derecho sobre una carpeta
       Directory\Background\shell\Asu  clic derecho en el fondo de una carpeta abierta
     Cada subopción abre Windows Terminal maximizado (o cmd si no está) en esa carpeta y
-    ejecuta asu; al terminar, la ventana espera una tecla.
+    ejecuta asu; al terminar, queda la consola (cmd) abierta en esa carpeta para seguir
+    escribiendo comandos.
     En Windows 11 aparece en "Mostrar más opciones" (o Shift + clic derecho).
 
     Genera en ~/.asu-cli (o $env:ASU_CLI_HOME):
-      asu-menu.cmd  lanzador: entra a la carpeta, ejecuta asu, pausa
       asu.ico       ícono armado desde recursos/asu.png
 
 .PARAMETER Desinstalar
-    Quita el menú, el lanzador y el ícono.
+    Quita el menú y el ícono (y el lanzador asu-menu.cmd de versiones anteriores).
 
 .EXAMPLE
     powershell -ExecutionPolicy Bypass -File scripts\menu-contextual.ps1
@@ -44,6 +44,7 @@ $entradas = @(
 )
 
 $carpetaAsu = if ($env:ASU_CLI_HOME) { $env:ASU_CLI_HOME } else { Join-Path $HOME '.asu-cli' }
+# Lanzador de versiones anteriores (un .cmd): ya no se usa; se borra al instalar o desinstalar.
 $lanzador = Join-Path $carpetaAsu 'asu-menu.cmd'
 $icono = Join-Path $carpetaAsu 'asu.ico'
 
@@ -122,26 +123,26 @@ $terminal = Get-Command wt -CommandType Application -ErrorAction SilentlyContinu
 $cmd = Join-Path $env:SystemRoot 'System32\cmd.exe'
 
 New-Item -ItemType Directory -Force -Path $carpetaAsu | Out-Null
-
-# %1 = carpeta; %2 %3 = argumentos de asu. chcp 65001: rutas y textos con tildes.
-# Pausa siempre: si no, la ventana se cierra antes de leer el resultado.
-$contenidoLanzador = @"
-@echo off
-chcp 65001 >nul
-cd /d "%~1" || (pause & exit /b 1)
-"$($asu.Source)" %2 %3
-pause
-"@
-[System.IO.File]::WriteAllText($lanzador, ($contenidoLanzador -replace "`r?`n", "`r`n"))
+if (Test-Path -LiteralPath $lanzador) {
+    Remove-Item -LiteralPath $lanzador -Force
+}
 
 Escribir-Icono (Join-Path $PSScriptRoot '..\recursos\asu.png') $icono
 
 # "%V." en vez de "%V": en la raíz quedaría "C:\" y wt leería \" como comilla
 # escapada. Con el punto: "C:\." o "C:\carpeta." (Windows quita el punto final).
-# "call": evita que cmd /c quite las comillas del lanzador.
-# wt: ventana nueva y maximizada.
-$prefijo = if ($terminal) { "`"$($terminal.Source)`" -w new --maximized " } else { '' }
-$base = "$prefijo`"$cmd`" /d /c call `"$lanzador`" `"%V.`""
+# cmd /k: al terminar asu, la consola sigue abierta en la carpeta para otros comandos.
+# Sin .cmd intermedio: con un batch, Ctrl+C (p. ej. cerrar el servidor de comparar)
+# preguntaría "¿Desea terminar el trabajo por lotes?".
+# chcp 65001: textos y rutas con tildes.
+# wt: ventana nueva y maximizada, con la carpeta como directorio inicial (-d); sin wt,
+# cmd entra a la carpeta con cd (las comillas llegan tal cual: no hay shell en medio).
+$asuExe = "`"$($asu.Source)`""
+$base = if ($terminal) {
+    "`"$($terminal.Source)`" -w new --maximized -d `"%V.`" `"$cmd`" /d /k chcp 65001 >nul & $asuExe"
+} else {
+    "`"$cmd`" /d /k chcp 65001 >nul & cd /d `"%V.`" & $asuExe"
+}
 
 Quitar-Menu
 foreach ($clave in $claves) {

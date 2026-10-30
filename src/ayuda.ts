@@ -138,6 +138,10 @@ marcan; por defecto, las salidas activas de asu config salidas: MP4 1080, MP4 72
 4. Deja "[<grupo>] <serie> - <ep> (<fuente> <ancho>x<alto>).<ext>" en la carpeta de salida.
 5. Borra los temporales si todo terminó bien.
 
+Cada encode deja un registro en <episodio>\\.asu\\registros\\encode-<fecha>.log (cada comando,
+duración, código y final de su salida); si algo falla, el error muestra la ruta. Si x264 o XviD
+pasan 120 s sin escribir nada, se consideran colgados: se matan y se reintenta una vez.
+
 La fuente (HDTV, BD...) se guarda por proyecto en .asu\\asu.json de la carpeta de la serie
 (la primera vez se pregunta). Lo elegido en el menú (versiones, subtítulos y orden, serie,
 episodio, pista) se recuerda en .asu\\asu.json del episodio y se usa por defecto la próxima vez. Si se corta, los temporales quedan en
@@ -166,16 +170,23 @@ export const AYUDA_COMPARAR = `Uso: asu comparar [dir] [opciones]
        asu comparar abrir [carpeta] [--no-abrir]
 
 Prueba A/B de ajustes de x264 sobre una versión MP4 del episodio ([dir], como en encode).
-1. Elige 3 tramos de 20 s analizando el raw: el más oscuro, el de más movimiento y el de más detalle.
+"asu comparar" solo, en una terminal, pregunta primero: nueva comparación o abrir una hecha
+(lista de las comparaciones, la más reciente primero). Con cualquier opción, compara directo.
+1. Elige 3 tramos de 20 s analizando el raw (con avance): el más oscuro, el de más movimiento y
+   el de más detalle.
 2. Codifica cada tramo con cada variante (asu config variantes): "actual" con el CRF de la salida y
    las demás igualadas a ella (2 pasadas al mismo bitrate, o con --igualar crf, el CRF que pesa igual).
-   Los clips ya codificados se reutilizan (caché en Comparaciones\.cache).
+   Los clips ya codificados se reutilizan (caché en Comparaciones\\.cache).
 3. Mide la SSIM de cada frame y captura los que más distinguen a las variantes.
-4. Deja resultados.json (todos los datos) e index.html en
-   <carpeta de salida>\Comparaciones\<serie> - <ep> - <fecha>\
+4. Deja resultados.json (todos los datos), index.html y registro.log (cada comando, duración,
+   código y final de su salida) en <carpeta de salida>\\Comparaciones\\<serie> - <ep> - <fecha>\\
 5. Abre la página servida por asu (http://127.0.0.1, con token): votación a ciegas primero, luego
-   capturas (alternar, cortina, diferencia, zoom), clips sincronizados y gráfico de SSIM. Desde la
-   página se vota, se adopta la variante ganadora y se abren archivos. Ctrl+C para cerrar.
+   capturas (alternar, cortina, diferencia, zoom, pantalla completa con F), clips sincronizados y
+   gráfico de SSIM. Desde la página se vota, se adopta la variante ganadora y se abren archivos.
+   Ctrl+C para cerrar.
+
+El análisis y las codificaciones que pasan 120 s sin escribir nada se consideran colgados: se
+matan y se reintenta una vez; si se repite, error con la ruta del registro.
 
 "asu comparar abrir" vuelve a abrir una comparación (por defecto, la última).
 index.html abierto como archivo funciona en solo lectura.

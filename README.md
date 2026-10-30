@@ -39,14 +39,14 @@ bun unlink
 
 ### Menú contextual del Explorador (opcional)
 
-Agrega "Asu" al clic derecho sobre una carpeta y sobre el fondo de una carpeta abierta, con subopciones: Menú…, Encode, Comparar, Verificar fuentes, AVS de trabajo, AVS de compresión, Unir subtítulos y Corregir offset. Cada una abre Windows Terminal maximizado (o cmd si no está) en esa carpeta y ejecuta `asu`; al terminar, la ventana espera una tecla para cerrarse. No pide administrador (escribe en `HKCU`).
+Agrega "Asu" al clic derecho sobre una carpeta y sobre el fondo de una carpeta abierta, con subopciones: Menú…, Encode, Comparar, Verificar fuentes, AVS de trabajo, AVS de compresión, Unir subtítulos y Corregir offset. Cada una abre Windows Terminal maximizado (o cmd si no está) en esa carpeta y ejecuta `asu`; al terminar, queda abierta una consola `cmd` en esa carpeta para seguir escribiendo comandos (de asu o cualquier otro; `exit` la cierra). "Comparar" abre el submenú Nueva comparación / Abrir una comparación. No pide administrador (escribe en `HKCU`).
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\menu-contextual.ps1
 powershell -ExecutionPolicy Bypass -File scripts\menu-contextual.ps1 -Desinstalar
 ```
 
-En Windows 11 aparece en "Mostrar más opciones" (o Shift + clic derecho). El script deja en `~/.asu-cli` el lanzador `asu-menu.cmd` (con la ruta absoluta de `asu`) y el ícono `asu.ico` (armado desde `recursos/asu.png`). Si cambia la ruta de `asu`, vuelve a ejecutarlo.
+En Windows 11 aparece en "Mostrar más opciones" (o Shift + clic derecho). Los comandos del registro llevan la ruta absoluta de `asu` y el script deja en `~/.asu-cli` el ícono `asu.ico` (armado desde `recursos/asu.png`). Si cambia la ruta de `asu`, o si lo instalaste con una versión anterior (que usaba el lanzador `asu-menu.cmd` y pedía una tecla al terminar), vuelve a ejecutarlo: el lanzador viejo se borra.
 
 ## Uso
 
@@ -193,6 +193,8 @@ Detalles:
 - **En paralelo**: x264 no ocupa toda la CPU (lo frena la entrada del `.avs`, que decodifica, dibuja subtítulos y redimensiona en un hilo) y XviD usa un hilo. Con las 3 versiones a la vez, una muestra de 60 s tardó 33 s contra 70 s en secuencia. Se cambia con `asu config paralelo N` o, para un encode, `--paralelo N`; `1` = en secuencia.
 - **Pantalla**: una línea por versión con su paso, frames, % aproximado (según la duración del `.avs`) y fps. La salida de las herramientas no se muestra mientras corren; si una falla, el error trae sus últimas líneas.
 - **Si una versión falla**, las demás siguen hasta terminar (su trabajo queda registrado), no se mueve ningún archivo final y `--reanudar` hace solo lo que faltó.
+- **Registro**: cada encode deja `<episodio>\.asu\registros\encode-<AAAA-MM-DD HHmmss>.log` con las opciones, cada comando (línea completa), su duración, código y final de stderr. Si algo falla, el error muestra la ruta.
+- **Cuelgues**: si x264 o XviD pasan 120 s sin escribir nada, se considera colgado: se matan los procesos de esa tubería, se anota cuáles seguían vivos y se reintenta una vez. Si se vuelve a colgar, error.
 - Un episodio por ejecución.
 
 ### comparar
@@ -205,7 +207,9 @@ asu comparar abrir [carpeta] [--no-abrir]
 
 Prueba A/B de ajustes de x264 sobre una versión MP4 del episodio (por defecto la primera, 1080). Usa el mismo raw, `.avs` y elecciones recordadas que `encode` (serie, episodio y subtítulos; las versiones recordadas no, porque comparar elige la suya).
 
-1. **Tramos por contenido:** ffmpeg analiza el raw completo a baja resolución (~2 min) y elige 3 tramos de 20 s que no se superponen: el **más oscuro** (sin contar negros ni fundidos), el de **más movimiento** y el de **más detalle** (entropía; puede caer en créditos o carteles). `--tramo` los reemplaza por los que indiques y `--tramos-fijos` usa el 25/50/75 % del episodio.
+`asu comparar` solo, sin ninguna opción y en una terminal, muestra primero el submenú Nueva comparación / Abrir una comparación (como el menú). Con cualquier opción o argumento (p. ej. `asu comparar .`) o sin terminal, compara directo.
+
+1. **Tramos por contenido:** ffmpeg analiza el raw completo a baja resolución (~2 min, con avance: %, velocidad y tiempo restante) y elige 3 tramos de 20 s que no se superponen: el **más oscuro** (sin contar negros ni fundidos), el de **más movimiento** y el de **más detalle** (entropía; puede caer en créditos o carteles). `--tramo` los reemplaza por los que indiques y `--tramos-fijos` usa el 25/50/75 % del episodio.
 2. **Variantes** (`asu config variantes`), aplicadas sobre los ajustes de la salida:
 
    | Variante | Ajustes |
@@ -224,8 +228,9 @@ Prueba A/B de ajustes de x264 sobre una versión MP4 del episodio (por defecto l
 6. **Resultado** en `<carpeta de salida>\Comparaciones\<serie> - <ep> - <fecha>\` (con sufijo `(2)`, `(3)`… si se repite en el mismo minuto):
    - `resultados.json`: todos los datos, para analizar con otras herramientas. Incluye tramos y motivo, ajustes completos de cada variante, kbps, kbps con CRF, CRF usado, fps, SSIM y PSNR por tramo, SSIM de cada frame, capturas con su motivo y SSIM, y votos.
    - `index.html`, `capturas\*.png` y `clips\*.mp4` (sin audio).
+   - `registro.log`: opciones, variantes y cada comando con su duración, código y final de stderr. Las codificaciones y el análisis de tramos tienen el mismo vigilante de cuelgues que `encode` (120 s sin salida: se reintenta una vez).
 
-**La página.** Al terminar, asu la sirve en `http://127.0.0.1:<puerto>` y abre el navegador; la terminal queda esperando hasta Ctrl+C o el botón "Cerrar servidor". `asu comparar abrir` reabre una comparación (por defecto, la última). Pestañas:
+**La página.** Al terminar, asu la sirve en `http://127.0.0.1:<puerto>` y abre el navegador; la terminal queda esperando hasta Ctrl+C o el botón "Cerrar servidor". `asu comparar abrir` reabre una comparación (por defecto, la última). En el menú, "Comparar ajustes de x264" ofrece **Nueva comparación** o **Abrir una comparación**: lista las de `<carpeta de salida>\Comparaciones` (la más reciente primero, con versión, variantes, tramos y votos); al cerrar el servidor se vuelve al menú. Pestañas:
 
 - **A ciegas** (se abre primero): las variantes aparecen como A, B, C, en un orden aleatorio distinto en cada captura, y la tabla y los nombres quedan ocultos. Votas cuál se ve mejor (o empate) y al terminar, o con "Revelar", se ven los nombres y el conteo. Los votos se guardan en `resultados.json`.
 - **Capturas:** tres modos.
@@ -234,6 +239,7 @@ Prueba A/B de ajustes de x264 sobre una versión MP4 del episodio (por defecto l
   - **Diferencia:** |variante − fuente| amplificada ×1–16; lo que brilla es lo que se perdió.
 
   Además: zoom Ajustar/1x/2x/4x de píxeles exactos que se mantiene al cambiar de versión (se arrastra para mover), miniaturas con la SSIM mínima de cada captura y la caja **Adoptar** (marcas las salidas, confirmas y asu cambia tu config).
+- **Tamaño de la imagen** (A ciegas y Capturas): el visor llega hasta el borde inferior de la ventana (lo demás queda al bajar) y la tabla de resultados va plegada. **Pantalla completa** con el botón o la tecla `F` (Esc sale): solo quedan los controles, el visor y, en A ciegas, los votos; las teclas siguen funcionando. "Ajustar" no agranda más de 1x, para no deformar los píxeles; para ampliar, 2x/4x.
 - **Clips:** dos videos lado a lado y sincronizados (los controles del izquierdo mueven ambos), con botón para abrirlos en tu reproductor.
 - **Gráfico:** SSIM de cada frame por variante y tramo, con las capturas marcadas (clic para verlas).
 
@@ -335,7 +341,8 @@ src/
   ayuda.ts          textos de --help
   ui.ts             prompts (@clack/prompts) y errores
   lista-ordenable.ts  prompt propio de lista reordenable (@clack/core)
-  ejecutor.ts       ejecución de procesos y tuberías (encode)
+  ejecutor.ts       ejecución de procesos y tuberías (encode), con vigilante de cuelgues
+  registro.ts       registro de comandos (encode y comparar) y reintento ante cuelgues
   servidor-comparacion.ts  servidor local de asu comparar (127.0.0.1 + token)
   comandos/         cada herramienta (I/O e interacción)
   nucleo/           lógica pura: generación de AVS, fuentes, unión y reescalado de .ass, nombres,

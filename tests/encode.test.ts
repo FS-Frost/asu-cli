@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { encode, type OpcionesEncode } from "../src/comandos/encode.ts";
 import type { Ejecutor } from "../src/ejecutor.ts";
@@ -169,6 +169,10 @@ type EjecutorFalso = Ejecutor & {
     llamadas: Comando[][];
     /** Hace fallar el primer comando cuyo texto contenga esto. */
     fallarEn?: string;
+    /** Simula que el vigilante corta (cuelgue) las próximas `veces` llamadas que contengan `texto`. */
+    colgarEn?: { texto: string; veces: number };
+    /** Líneas de las llamadas que pidieron vigilante. */
+    vigiladas: string[];
     duracion: string;
     /** Salida de `ffmpeg -i <raw>`. */
     infoRaw: string;
@@ -182,6 +186,7 @@ type EjecutorFalso = Ejecutor & {
 function ejecutorFalso(): EjecutorFalso {
     const falso: EjecutorFalso = {
         llamadas: [],
+        vigiladas: [],
         duracion: "00:23:40.00",
         infoRaw: INFO_RAW,
         bytesAvi: 1000,
@@ -201,6 +206,13 @@ function ejecutorFalso(): EjecutorFalso {
                 falso.videosActivos--;
             }
 
+            if (opciones?.vigilar) {
+                falso.vigiladas.push(texto);
+            }
+            if (falso.colgarEn && falso.colgarEn.veces > 0 && texto.includes(falso.colgarEn.texto)) {
+                falso.colgarEn.veces--;
+                return { codigo: -1, stderr: "frame 398\n", colgado: { vivos: ["ffmpeg.exe", "x264.exe"] } };
+            }
             if (falso.fallarEn && texto.includes(falso.fallarEn)) {
                 falso.fallarEn = undefined;
                 return { codigo: 1, stderr: "x264 [error]: algo salió mal\n" };
@@ -446,6 +458,54 @@ describe("asu encode (ejecutor falso)", () => {
             const estado = JSON.parse(readFileSync(join(temporales, "estado.json"), "utf8"));
             expect(estado.completados).toEqual(expect.arrayContaining(["mux-1080", "mux-396"]));
             expect(estado.completados).not.toContain("x264-720");
+        });
+
+        describe("registro y vigilante", () => {
+            const registros = () => {
+                const carpeta = join(dir, ".asu", "registros");
+                return existsSync(carpeta) ? readdirSync(carpeta).map((nombre) => join(carpeta, nombre)) : [];
+            };
+
+            test("deja un registro en .asu/registros del episodio con cada comando y su resultado", async () => {
+                expect(await correr()).toBe(0);
+                const [registro, ...otros] = registros();
+                expect(otros).toHaveLength(0);
+                expect(basename(registro!)).toMatch(/^encode-\d{4}-\d{2}-\d{2} \d{6}\.log$/);
+
+                const texto = readFileSync(registro!, "utf8");
+                expect(texto).toContain("asu encode");
+                expect(texto).toContain("x264.exe");
+                expect(texto).toContain("--preset slow");
+                expect(texto).toContain("termina: código 0");
+                expect(texto).toContain("Terminado (código 0).");
+            });
+
+            test("solo las codificaciones de video llevan vigilante", async () => {
+                await correr();
+                expect(falso.vigiladas).toHaveLength(4); // 2 x264 + 2 pasadas de XviD
+                expect(falso.vigiladas.every((linea) => linea.includes("x264.exe") || linea.includes("xvid_encraw.exe"))).toBe(true);
+            });
+
+            test("un cuelgue se reintenta una vez y queda anotado", async () => {
+                falso.colgarEn = { texto: "720.264", veces: 1 };
+                expect(await correr()).toBe(0);
+                expect(llamadasCon("720.264 --stdin")).toHaveLength(2);
+
+                const texto = readFileSync(registros()[0]!, "utf8");
+                expect(texto).toContain("COLGADO");
+                expect(texto).toContain("seguían vivos: ffmpeg.exe, x264.exe");
+                expect(texto).toContain("se reintenta una vez");
+            });
+
+            test("dos cuelgues seguidos: error con los procesos vivos y la ruta del registro", async () => {
+                falso.colgarEn = { texto: "720.264", veces: 2 };
+                const error = (await correr().catch((e: unknown) => e)) as Error;
+                expect(error).toBeInstanceOf(ErrorUsuario);
+                expect(error.message).toContain("se colgó dos veces");
+                expect(error.message).toContain("ffmpeg.exe, x264.exe");
+                expect(error.message).toContain(`Registro: ${registros()[0]}`);
+                expect(readFileSync(registros()[0]!, "utf8")).toContain("ERROR:");
+            });
         });
 
         test("--reiniciar descarta lo hecho", async () => {

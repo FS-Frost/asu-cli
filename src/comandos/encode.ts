@@ -7,6 +7,7 @@ import { generarAvsCompresion } from "../nucleo/avs.ts";
 import { buscarPreajuste, buscarSalida, cargarConfig, guardarConfig, parsearParalelo, type Config, type Salida } from "../nucleo/config.ts";
 import { LectorAvance, ejecutarConLimite, framesAproximados, ultimasLineas } from "../nucleo/avance.ts";
 import { PanelAvance } from "../panel-avance.ts";
+import { Registro, anotarError, ejecutarVigilado, ejecutorConRegistro, rutaRegistroEncode } from "../registro.ts";
 import {
     archivoAudio,
     calcularBitrateXvid,
@@ -595,24 +596,29 @@ function producto(paso: Paso): string {
 
 /**
  * Ejecuta una tubería leyendo su salida (avance en `alFrames`). Si falla, el error incluye las
- * últimas líneas de la herramienta, que no se mostraron mientras corría.
+ * últimas líneas de la herramienta, que no se mostraron mientras corría. Con `vigilar` (las
+ * codificaciones), un cuelgue se reintenta una vez.
  */
 async function correr(
-    ejecutor: Ejecutor,
+    ctx: Contexto,
     comandos: Comando[],
     descripcion: string,
     esperado: string,
-    alFrames?: (frames: number) => void,
+    { alFrames, vigilar = false }: { alFrames?: (frames: number) => void; vigilar?: boolean } = {},
 ): Promise<void> {
     const lector = new LectorAvance();
-    const { codigo, stderr } = await ejecutor.ejecutar(comandos, {
-        alSalida: (texto) => {
+    const opciones = {
+        alSalida: (texto: string) => {
             lector.leer(texto);
             if (lector.frames !== null) {
                 alFrames?.(lector.frames);
             }
         },
-    });
+    };
+    const { codigo, stderr } = vigilar
+        ? await ejecutarVigilado(ctx.ejecutor, comandos, opciones, descripcion, ({ vivos }) =>
+            ctx.registro?.escribir(`"${descripcion}" se colgó (vivos: ${vivos.join(", ") || "ninguno"}); se reintenta una vez.`))
+        : await ctx.ejecutor.ejecutar(comandos, opciones);
 
     if (codigo !== 0 || !existsSync(esperado)) {
         const detalle = ultimasLineas(stderr);
@@ -627,23 +633,24 @@ type Contexto = {
     pista: number;
     dirTemporal: string;
     estado: EstadoEncode;
+    registro?: Registro;
 };
 
 async function ejecutarPaso(paso: Paso, ctx: Contexto, alFrames?: (frames: number) => void): Promise<void> {
-    const { ejecutor, h, dirTemporal, estado } = ctx;
+    const { h, dirTemporal, estado } = ctx;
 
     switch (paso.tipo) {
         case "audio":
             if (paso.copiar) {
-                return correr(ejecutor, [comandoCopiarAudio(h, ctx.video, ctx.pista, paso.salida)], paso.descripcion, paso.salida);
+                return correr(ctx, [comandoCopiarAudio(h, ctx.video, ctx.pista, paso.salida)], paso.descripcion, paso.salida);
             }
-            return correr(ejecutor, comandosAudio(h, ctx.video, ctx.pista, estado.ganancia ?? 0, paso.audio, paso.salida), paso.descripcion, paso.salida);
+            return correr(ctx, comandosAudio(h, ctx.video, ctx.pista, estado.ganancia ?? 0, paso.audio, paso.salida), paso.descripcion, paso.salida);
 
         case "x264":
             if (paso.archivos.salida.tipo !== "mp4-x264") {
                 return;
             }
-            return correr(ejecutor, comandosX264(h, paso.archivos.avs, paso.archivos.salida.x264, paso.video264), paso.descripcion, paso.video264, alFrames);
+            return correr(ctx, comandosX264(h, paso.archivos.avs, paso.archivos.salida.x264, paso.video264), paso.descripcion, paso.video264, { alFrames, vigilar: true });
 
         case "xvid": {
             const salida = paso.archivos.salida;
@@ -653,23 +660,23 @@ async function ejecutarPaso(paso: Paso, ctx: Contexto, alFrames?: (frames: numbe
             }
 
             return correr(
-                ejecutor,
+                ctx,
                 [comandoXvid(h, paso.archivos.avs, paso.pasada, paso.stats, bitrate, salida.xvid, paso.m4v)],
                 paso.descripcion,
                 producto(paso),
-                alFrames,
+                { alFrames, vigilar: true },
             );
         }
 
         case "mux-mp4":
-            await correr(ejecutor, [comandoMp4Video(h, paso.video264, dirTemporal, paso.videoMp4)], paso.descripcion, paso.videoMp4);
-            return correr(ejecutor, [comandoMp4Mux(h, paso.videoMp4, paso.audio, dirTemporal, paso.archivos.temporal)], paso.descripcion, paso.archivos.temporal);
+            await correr(ctx, [comandoMp4Video(h, paso.video264, dirTemporal, paso.videoMp4)], paso.descripcion, paso.videoMp4);
+            return correr(ctx, [comandoMp4Mux(h, paso.videoMp4, paso.audio, dirTemporal, paso.archivos.temporal)], paso.descripcion, paso.archivos.temporal);
 
         case "mux-avi":
-            await correr(ejecutor, [comandoAviVideo(h, paso.m4v, paso.aviVideo)], paso.descripcion, paso.aviVideo);
+            await correr(ctx, [comandoAviVideo(h, paso.m4v, paso.aviVideo)], paso.descripcion, paso.aviVideo);
             // MeGUI escribe el script en UTF-8 con BOM.
             writeFileSync(paso.script, `﻿${scriptAvimux(paso.audio, paso.aviVideo, paso.archivos.temporal)}`, "utf8");
-            return correr(ejecutor, [comandoAvimux(h, paso.script)], paso.descripcion, paso.archivos.temporal);
+            return correr(ctx, [comandoAvimux(h, paso.script)], paso.descripcion, paso.archivos.temporal);
     }
 }
 
@@ -735,6 +742,19 @@ async function ejecutarCadena(cadena: Cadena, ctx: Contexto, panel: PanelAvance,
  * herramientas de MeGUI, la deja con su nombre final en la carpeta de salida y limpia los temporales.
  */
 export async function encode(opciones: OpcionesEncode, ejecutor: Ejecutor = ejecutorReal): Promise<number> {
+    let registro: Registro | undefined;
+    try {
+        const codigo = await encodeConRegistro(opciones, ejecutor, (r) => (registro = r));
+        registro?.escribir(`Terminado (código ${codigo}).`);
+        return codigo;
+    } catch (error) {
+        throw anotarError(registro, error);
+    }
+}
+
+/** El registro se crea al empezar a codificar (`alRegistro`); lo anterior son preguntas y lecturas rápidas. */
+async function encodeConRegistro(opciones: OpcionesEncode, ejecutorBase: Ejecutor, alRegistro: (registro: Registro) => void): Promise<number> {
+    let ejecutor = ejecutorBase;
     const dir = resolverDirectorio(opciones.dir);
     p.log.info(`Directorio: ${dir}`);
 
@@ -785,7 +805,21 @@ export async function encode(opciones: OpcionesEncode, ejecutor: Ejecutor = ejec
     mkdirSync(dirTemporal, { recursive: true });
     guardarEstado(dirTemporal, estado);
 
-    const ctx: Contexto = { ejecutor, h, video, pista: pista.indice, dirTemporal, estado };
+    const registro = new Registro(rutaRegistroEncode(dir), "asu encode");
+    alRegistro(registro);
+    registro.escribir(
+        [
+            `Episodio: ${dir}`,
+            `Raw: ${video} (pista ${pista.indice + 1})`,
+            `Temporales: ${dirTemporal}${estado.completados.length > 0 ? ` (reanudando: ${estado.completados.length} pasos hechos)` : ""}`,
+            `Opciones: ${JSON.stringify(opciones)}`,
+            ...archivos.map((a) => `Salida ${a.salida.nombre}: ${a.avs} -> ${a.final}\n  ${JSON.stringify(a.salida)}`),
+        ].join("\n"),
+    );
+    p.log.info(`Registro: ${registro.ruta}`);
+    ejecutor = ejecutorConRegistro(ejecutorBase, registro);
+
+    const ctx: Contexto = { ejecutor, h, video, pista: pista.indice, dirTemporal, estado, registro };
     try {
         const plan = planificarCadenas(archivos, dirTemporal, { copiarAac: esAac(pista) });
 

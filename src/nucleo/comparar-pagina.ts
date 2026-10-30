@@ -51,7 +51,8 @@ const ESTILOS = `
 :root { color-scheme: dark; --fondo: #18181b; --panel: #232327; --borde: #3f3f46; --texto: #e4e4e7; --tenue: #a1a1aa; --acento: #60a5fa; --peligro: #f87171; }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--fondo); color: var(--texto); font: 14px/1.4 system-ui, sans-serif; }
-header { padding: 10px 16px 0; background: var(--panel); position: sticky; top: 0; z-index: 5; }
+header { padding: 10px 16px 0; background: var(--panel); }
+details > summary { cursor: pointer; color: var(--tenue); margin-top: 4px; }
 h1 { margin: 0; font-size: 17px; }
 .fila { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .separador { flex: 1; }
@@ -72,6 +73,10 @@ nav button { border-bottom: none; border-radius: 6px 6px 0 0; }
 main section { padding: 8px 16px; }
 .controles { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 6px; }
 .visor { position: relative; overflow: auto; height: calc(100vh - 330px); min-height: 300px; background: #000; border: 1px solid var(--borde); cursor: grab; }
+main section:fullscreen { display: flex; flex-direction: column; padding: 6px 8px; background: var(--fondo); overflow: hidden; }
+main section:fullscreen .controles { margin-bottom: 4px; }
+main section:fullscreen .visor { flex: 1; height: auto; min-height: 0; border: none; }
+main section:fullscreen .solo-ventana { display: none !important; }
 .visor.arrastrando { cursor: grabbing; }
 .lienzo { position: relative; margin: 0 auto; }
 .lienzo img, .lienzo canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; image-rendering: pixelated; user-select: none; -webkit-user-drag: none; }
@@ -163,7 +168,12 @@ function dibujarTabla() {
     return;
   }
   const votos = conteo();
-  caja.append(el("table", {},
+  // Plegable para dejarle más alto al visor; se recuerda abierta o cerrada.
+  const plegable = el("details", { open: guardado("tablaAbierta", false) ? true : null },
+    el("summary", {}, "Tabla de resultados (kbps, fps, SSIM, PSNR, votos)"));
+  plegable.addEventListener("toggle", () => { guardar("tablaAbierta", plegable.open); if (pestana === "ciegas" || pestana === "capturas") mostrar(); });
+  caja.append(plegable);
+  plegable.append(el("table", {},
     el("thead", {}, el("tr", {}, ["Variante", "Ajustes", "kbps", "kbps con CRF", "fps", "SSIM", "PSNR (dB)", "Votos"].map((t) => el("th", {}, t)))),
     el("tbody", {}, D.variantes.map((v, i) => el("tr", {},
       el("td", {}, el("kbd", {}, i + 1), " ", el("b", { style: "color:" + COLORES[i % COLORES.length] }, v.nombre)),
@@ -172,7 +182,7 @@ function dibujarTabla() {
       el("td", {}, num(v.promedio.ssim, 5)), el("td", {}, num(v.promedio.psnr, 2)), el("td", {}, votos[v.nombre] || 0),
     ))),
   ));
-  if (votos.empate) caja.append(el("div", { class: "tenue" }, "Empates: " + votos.empate));
+  if (votos.empate) plegable.append(el("div", { class: "tenue" }, "Empates: " + votos.empate));
 }
 
 // ---------- Pestañas ----------
@@ -213,6 +223,24 @@ function ajustarLienzo(visor, lienzo, ancho, alto) {
   lienzo.style.height = alto * escala + "px";
   visor.scrollLeft = izq * lienzo.offsetWidth; visor.scrollTop = arr * lienzo.offsetHeight;
 }
+// El visor llega hasta el borde inferior de la ventana (lo de abajo queda al hacer scroll).
+// En pantalla completa lo maneja el CSS (flex).
+function altoVisor(visor) {
+  if (document.fullscreenElement) { visor.style.height = ""; return; }
+  const arriba = visor.getBoundingClientRect().top + scrollY;
+  visor.style.height = Math.max(300, innerHeight - arriba - 8) + "px";
+}
+// Pantalla completa de la sección entera: sobrevive a que mostrar() rehaga su contenido.
+function alternarPantallaCompleta() {
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  else document.getElementById("vista-" + pestana).requestFullscreen().catch((e) => alert("El navegador no permitió la pantalla completa: " + e.message));
+}
+function botonPantallaCompleta() {
+  return el("button", { onclick: alternarPantallaCompleta, title: "Tecla F" }, document.fullscreenElement ? "Salir de pantalla completa (F)" : "Pantalla completa (F)");
+}
+document.addEventListener("fullscreenchange", () => mostrar());
+let redimension = null;
+addEventListener("resize", () => { clearTimeout(redimension); redimension = setTimeout(() => { if (pestana === "ciegas" || pestana === "capturas") mostrar(); }, 150); });
 function controlesZoom(alCambiar) {
   return el("span", {}, "Zoom: ", [[0, "Ajustar"], [1, "1x"], [2, "2x"], [4, "4x"]].map(([z, t]) =>
     el("button", { class: zoom === z ? "activo" : "", onclick: () => { zoom = z; guardar("zoom", z); alCambiar(); } }, t)));
@@ -266,6 +294,7 @@ function vistaCiegas() {
       el("button", { class: ciegaVersion === 0 ? "activo" : "", onclick: () => { ciegaVersion = 0; mostrar(); } }, "0 fuente"),
       lista.map((n, i) => el("button", { class: ciegaVersion === i + 1 ? "activo" : "", onclick: () => { ciegaVersion = i + 1; mostrar(); } }, (i + 1) + " " + (revelado ? n : LETRAS[i]))),
       controlesZoom(mostrar),
+      botonPantallaCompleta(),
     ),
     visor,
     el("div", { class: "votos" },
@@ -273,8 +302,11 @@ function vistaCiegas() {
       lista.map((n, i) => el("button", { class: misVotos[ciegaCaptura] === n ? "activo" : "", onclick: () => votar(n) }, revelado ? n : LETRAS[i])),
       el("button", { class: misVotos[ciegaCaptura] === "empate" ? "activo" : "", onclick: () => votar("empate") }, "Empate"),
     ),
-    el("div", { class: "tenue" }, "Teclas: 0-" + lista.length + " cambian de versión, ←/→ de captura. Las letras se mezclan en cada captura." + (SERVIDOR ? "" : " Sin servidor, los votos solo quedan en este navegador.")),
+    el("div", { class: "tenue solo-ventana" }, "Teclas: 0-" + lista.length + " cambian de versión, ←/→ de captura, F pantalla completa. Las letras se mezclan en cada captura." + (SERVIDOR ? "" : " Sin servidor, los votos solo quedan en este navegador.")),
   );
+  // Deja espacio para la barra de votos bajo el visor.
+  altoVisor(visor);
+  if (!document.fullscreenElement) visor.style.height = Math.max(300, parseFloat(visor.style.height) - caja.querySelector(".votos").offsetHeight - 6) + "px";
 }
 function revelar() { revelado = true; guardar("revelado", true); pestana = "capturas"; dibujarTabla(); mostrar(); }
 
@@ -296,7 +328,8 @@ function vistaCapturas() {
   const controles = el("div", { class: "controles" },
     "Vista: ", [["alternar", "Alternar"], ["cortina", "Cortina"], ["diferencia", "Diferencia"]].map(([m, t]) =>
       el("button", { class: modoVista === m ? "activo" : "", onclick: () => { modoVista = m; guardar("modoVista", m); mostrar(); } }, t)),
-    controlesZoom(mostrar));
+    controlesZoom(mostrar),
+    botonPantallaCompleta());
   caja.append(controles);
 
   const ssim = nombres.map((n, i) => el("span", { style: "color:" + COLORES[i % COLORES.length] }, n + " " + num(c.ssim[n], 5))).flatMap((s, i) => (i ? [" · ", s] : [s]));
@@ -361,7 +394,8 @@ function vistaCapturas() {
   }
 
   caja.append(visor);
-  caja.append(el("div", { class: "miniaturas" }, D.capturas.map((cap, i) => el("div", { class: "miniatura" + (i === captura ? " activa" : ""), onclick: () => { captura = i; guardar("captura", i); mostrar(); } },
+  altoVisor(visor);
+  caja.append(el("div", { class: "miniaturas solo-ventana" }, D.capturas.map((cap, i) => el("div", { class: "miniatura" + (i === captura ? " activa" : ""), onclick: () => { captura = i; guardar("captura", i); mostrar(); } },
     el("img", { src: cap.fuente, alt: "", loading: "lazy" }),
     el("div", {}, "T" + cap.tramo + " " + tiempo(cap.segundo) + " · mín " + num(Math.min(...nombres.map((n) => cap.ssim[n] ?? 1)), 4))))));
   caja.append(cajaAdoptar(adoptarVariante));
@@ -375,7 +409,7 @@ async function adoptar(variante, salidas) {
 }
 let salidasMp4 = null;
 function cajaAdoptar(nombre) {
-  const caja = el("div", { class: "adoptar" });
+  const caja = el("div", { class: "adoptar solo-ventana" });
   const v = D.variantes.find((x) => x.nombre === nombre);
   if (!v) { caja.append(el("span", { class: "tenue" }, "Fuente: el .avs sin codificar (referencia visual).")); return caja; }
   if (!v.adoptar) { caja.append(el("span", { class: "tenue" }, v.nombre + ": son los ajustes que ya usa la salida; no hay nada que adoptar.")); return caja; }
@@ -456,6 +490,7 @@ function vistaGrafico() {
 addEventListener("keydown", (e) => {
   if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
   const total = D.capturas.length;
+  if ((e.key === "f" || e.key === "F") && !e.ctrlKey && !e.altKey && !e.metaKey && (pestana === "ciegas" || pestana === "capturas")) { alternarPantallaCompleta(); return; }
   if (pestana === "ciegas") {
     if (/^[0-9]$/.test(e.key) && Number(e.key) <= nombres.length) { ciegaVersion = Number(e.key); mostrar(); }
     else if (e.key === "ArrowRight" && ciegaCaptura < total - 1) { ciegaCaptura++; ciegaVersion = 0; mostrar(); }

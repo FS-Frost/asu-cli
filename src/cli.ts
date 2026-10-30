@@ -36,8 +36,8 @@ import { encode } from "./comandos/encode.ts";
 import { reescalarArchivos } from "./comandos/reescalar.ts";
 import { unirArchivos } from "./comandos/unir.ts";
 import { verificarFuentes } from "./comandos/verificar-fuentes.ts";
-import { menu } from "./menu.ts";
-import { Cancelado, ErrorUsuario } from "./ui.ts";
+import { menu, menuComparar } from "./menu.ts";
+import { Cancelado, ErrorUsuario, esInteractivo } from "./ui.ts";
 
 const OPCION_AYUDA = { help: { type: "boolean", short: "h" } } as const;
 const OPCIONES_SERIE_EPISODIO = {
@@ -224,6 +224,11 @@ async function ejecutar(argv: string[]): Promise<number> {
         }
 
         case "comparar": {
+            // Sin nada más y con terminal: el mismo submenú que el menú (nueva o abrir una hecha).
+            if (args.length === 0 && esInteractivo()) {
+                return menuComparar();
+            }
+
             if (args[0] === "abrir") {
                 const { values, positionals } = parsear("comparar abrir", args.slice(1), {
                     "carpeta-salida": { type: "string" },
