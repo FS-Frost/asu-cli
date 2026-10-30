@@ -15,7 +15,7 @@ Solo Windows. Usa [Bun](https://bun.com) y [`@fs-frost/asu`](https://jsr.io/@fs-
 Requisitos: [Bun](https://bun.com) 1.4 o superior.
 
 ```powershell
-git clone <repo> asu-cli
+git clone https://github.com/FS-Frost/asu-cli.git asu-cli
 cd asu-cli
 bun install
 bun link
