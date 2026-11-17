@@ -145,7 +145,7 @@ describe("paralelo", () => {
     });
 });
 
-describe("migración v1 → v2", () => {
+describe("migración de config.json", () => {
     let home: string;
 
     beforeEach(() => {
@@ -186,9 +186,11 @@ describe("migración v1 → v2", () => {
         expect((mp4 as Extract<Salida, { tipo: "mp4-x264" }>).x264.preset).toBe("slow");
         expect((avi as Extract<Salida, { tipo: "avi-xvid" }>).xvid).toEqual([...XVID_DE_FABRICA]);
         expect(config.rutaMegui).toBe("C:\MeGUI");
-        expect(avisos).toHaveLength(1);
+        expect(config.crcEnNombre).toBe(true);
+        // "Configuración actualizada…" + el aviso del CRC (v2 → v3).
+        expect(avisos).toHaveLength(2);
 
-        expect(JSON.parse(readFileSync(rutaConfig(), "utf8")).version).toBe(2);
+        expect(JSON.parse(readFileSync(rutaConfig(), "utf8")).version).toBe(3);
         const otraVez: string[] = [];
         cargarConfig((mensaje) => otraVez.push(mensaje));
         expect(otraVez).toHaveLength(0);
@@ -215,7 +217,20 @@ describe("migración v1 → v2", () => {
         expect(() => cargarConfig()).toThrow("Preset x264 inválido");
     });
 
-    test("config ya en v2 no se migra", () => {
-        expect(migrarConfig({ version: 2, salidas: [] }).migrada).toBe(false);
+    test("v2 → v3: agrega crcEnNombre (true) y avisa; un valor ya puesto se respeta; v3 no se migra", () => {
+        const v2 = migrarConfig({ version: 2, salidas: [] });
+        expect(v2.migrada).toBe(true);
+        expect(v2.datos).toEqual({ version: 3, salidas: [], crcEnNombre: true });
+        expect(v2.avisos.some((aviso) => aviso.includes("CRC32"))).toBe(true);
+
+        expect(migrarConfig({ version: 2, crcEnNombre: false }).datos.crcEnNombre).toBe(false);
+        expect(migrarConfig({ version: 3, salidas: [] }).migrada).toBe(false);
+    });
+
+    test("crcEnNombre: falta = true (de fábrica); no booleano es un error", () => {
+        writeFileSync(rutaConfig(), JSON.stringify({ version: 3 }));
+        expect(cargarConfig().crcEnNombre).toBe(true);
+        writeFileSync(rutaConfig(), JSON.stringify({ version: 3, crcEnNombre: "sí" }));
+        expect(() => cargarConfig()).toThrow("crcEnNombre");
     });
 });

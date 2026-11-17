@@ -11,6 +11,7 @@ Comandos:
   corregir-offset [dir]   Remuxea el video a MKV con el primer frame en 0 (como lo ve Aegisub).
   encode [dir]            Encode completo del episodio (MP4 1080, MP4 720, AVI 396...) con las herramientas de MeGUI.
   comparar [dir]          Prueba A/B de ajustes de x264: tramos codificados con cada variante y página para comparar.
+  crc [carpeta|archivo]   Calcula el CRC32 de archivos y lo compara con el del nombre ("… [ABCD1234].mp4").
   config <subcomando>     Administra preajustes, salidas de encode y rutas.
 
 Opciones globales:
@@ -59,7 +60,27 @@ Termina con código 1 si falta alguna fuente o algún .ass no se pudo leer.
 Opciones:
   -h, --help              Muestra esta ayuda.`;
 
-export const AYUDA_UNIR = `Uso: asu unir [dir] [opciones]
+export const AYUDA_CRC = `Uso: asu crc [carpeta | archivo]...
+
+"asu crc" solo, en una terminal, muestra un submenú:
+- Calcular CRC (por defecto): eliges archivos de la carpeta actual (ninguno marcado) y se
+  muestra el CRC32 de cada uno; los que traen [XXXXXXXX] en el nombre además se comparan.
+- Verificar la carpeta: lo mismo que "asu crc ." (abajo).
+
+Con argumentos (o sin terminal), recalcula el CRC32 de cada archivo y lo compara con el que lleva en el nombre
+("[SyncRajo] Serie - 01 (HDTV 1920x1080) [ABCD1234].mp4"). Si no coincide, el archivo
+está corrupto o fue modificado (detecta daños accidentales, no manipulación intencional).
+
+- Carpeta (por defecto, la actual): revisa los archivos con "[XXXXXXXX]" al final del nombre
+  (no recursivo). Sirve también para releases de otros grupos.
+- Archivo sin CRC en el nombre: solo muestra el CRC32 calculado.
+
+Termina con código 1 si alguno no coincide o no hay archivos con CRC.
+
+Opciones:
+  -h, --help              Muestra esta ayuda.`;
+
+export const AYUDA_UNIR =`Uso: asu unir [dir] [opciones]
 
 Une varios .ass en uno. Las líneas quedan por bloques en el orden indicado
 (en una misma capa, lo que va después se dibuja encima).
@@ -135,7 +156,10 @@ marcan; por defecto, las salidas activas de asu config salidas: MP4 1080, MP4 72
    - mp4-x264: ffmpeg | x264 → mp4box con el audio AAC (japonés).
    - avi-xvid: xvid_encraw en 2 pasadas con el bitrate calculado para no superar
      el tamaño máximo → AVI-Mux GUI con el audio MP3.
-4. Deja "[<grupo>] <serie> - <ep> (<fuente> <ancho>x<alto>).<ext>" en la carpeta de salida.
+4. Deja "[<grupo>] <serie> - <ep> (<fuente> <ancho>x<alto>) [<CRC32>].<ext>" en la carpeta de
+   salida (sin el CRC si "crcEnNombre" es false en config.json; se verifica con asu crc).
+   Un final anterior del mismo episodio y versión, con cualquier CRC o sin él, cuenta como
+   existente: se pregunta (o -f) y se reemplaza al terminar.
 5. Borra los temporales si todo terminó bien.
 
 Cada encode deja un registro en <episodio>\\.asu\\registros\\encode-<fecha>.log (cada comando,

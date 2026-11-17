@@ -108,6 +108,8 @@ export type Config = {
     paralelo: number;
     /** Variantes de x264 para `asu comparar`. */
     variantes: Variante[];
+    /** Agrega el CRC32 del archivo al nombre final del encode: "… (HDTV 1920x1080) [ABCD1234].mp4". */
+    crcEnNombre: boolean;
 };
 
 export const PARALELO_DE_FABRICA = 3;
@@ -124,7 +126,7 @@ export const PREAJUSTES_DE_FABRICA: readonly Preajuste[] = [
     { nombre: "1080p", ancho: 1920, alto: 1080, etiqueta: "MP4 1080" },
 ];
 
-export const VERSION_CONFIG = 2;
+export const VERSION_CONFIG = 3;
 
 const X264_DE_FABRICA: AjustesX264 = {
     // "slow": +3,5 % de compresión por −5 % de velocidad frente a "medium" (medido).
@@ -169,6 +171,7 @@ export function configDeFabrica(): Config {
         grupo: "SyncRajo",
         paralelo: PARALELO_DE_FABRICA,
         variantes: variantesDeFabrica(),
+        crcEnNombre: true,
     };
 }
 
@@ -395,6 +398,7 @@ export type ResultadoMigracion = {
  * Lleva un config.json de una versión anterior a la actual:
  * - v1 → v2: x264 sin `preset` recibe "slow"; banderas de XviD iguales a las de fábrica v1
  *   pasan a las nuevas (sin -turbo, 4 hilos). Si fueron editadas, no se tocan y se avisa.
+ * - v2 → v3: `crcEnNombre: true` (CRC32 en el nombre final del encode).
  */
 export function migrarConfig(datos: Record<string, unknown>): ResultadoMigracion {
     const version = typeof datos.version === "number" ? datos.version : 1;
@@ -403,8 +407,18 @@ export function migrarConfig(datos: Record<string, unknown>): ResultadoMigracion
     }
 
     const avisos: string[] = [];
-    const salidas = Array.isArray(datos.salidas)
-        ? (datos.salidas as Record<string, unknown>[]).map((salida) => {
+    let migrados: Record<string, unknown> = version < 2 ? { ...datos, salidas: migrarSalidasV2(datos.salidas, avisos) } : { ...datos };
+    if (version < 3 && typeof migrados.crcEnNombre !== "boolean") {
+        migrados = { ...migrados, crcEnNombre: true };
+        avisos.push('Nuevo: el encode agrega el CRC32 al nombre final ("… [ABCD1234].mp4"). Se desactiva con "crcEnNombre": false en config.json.');
+    }
+
+    return { datos: { ...migrados, version: VERSION_CONFIG }, migrada: true, avisos };
+}
+
+function migrarSalidasV2(salidasV1: unknown, avisos: string[]): unknown {
+    return Array.isArray(salidasV1)
+        ? (salidasV1 as Record<string, unknown>[]).map((salida) => {
             if (salida?.tipo === "mp4-x264" && salida.x264 && typeof salida.x264 === "object" && !("preset" in salida.x264)) {
                 return { ...salida, x264: { preset: "slow", ...(salida.x264 as object) } };
             }
@@ -423,9 +437,7 @@ export function migrarConfig(datos: Record<string, unknown>): ResultadoMigracion
 
             return salida;
         })
-        : datos.salidas;
-
-    return { datos: { ...datos, salidas, version: VERSION_CONFIG }, migrada: true, avisos };
+        : salidasV1;
 }
 
 function validarConfig(datos: unknown): Config {
@@ -441,7 +453,12 @@ function validarConfig(datos: unknown): Config {
         grupo: parcial.grupo ?? fabrica.grupo,
         paralelo: parcial.paralelo ?? fabrica.paralelo,
         variantes: parcial.variantes ?? fabrica.variantes,
+        crcEnNombre: parcial.crcEnNombre ?? fabrica.crcEnNombre,
     };
+
+    if (typeof config.crcEnNombre !== "boolean") {
+        throw new Error('"crcEnNombre" debe ser true o false.');
+    }
 
     if (!Array.isArray(config.variantes)) {
         throw new Error('"variantes" debe ser una lista.');

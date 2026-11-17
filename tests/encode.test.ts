@@ -24,8 +24,10 @@ import {
     type ArchivosSalida,
     type Comando,
 } from "../src/nucleo/encode.ts";
+import { formatearCrc } from "../src/nucleo/nombres.ts";
 import { ErrorUsuario } from "../src/ui.ts";
 import { construirASS, directorioTemporal, escribirJson } from "./utilidades.ts";
+import { crc32 } from "node:zlib";
 
 const MEGUI = "C:\\MeGUI";
 const h = herramientasDeMegui(MEGUI);
@@ -255,8 +257,9 @@ describe("asu encode (ejecutor falso)", () => {
     let falso: EjecutorFalso;
     const entorno = { ...process.env };
 
+    // Sin CRC en el nombre para que los nombres finales sean fijos; el CRC tiene sus propios tests.
     const config = (cambios: Partial<Config> = {}) =>
-        guardarConfig({ ...configDeFabrica(), rutaMegui: MEGUI, carpetaSalida: salida, ...cambios });
+        guardarConfig({ ...configDeFabrica(), rutaMegui: MEGUI, carpetaSalida: salida, crcEnNombre: false, ...cambios });
 
     const correr = (opciones: OpcionesEncode = {}) => encode({ dir, fuente: "HDTV", ignorarFuentes: true, ...opciones }, falso);
 
@@ -458,6 +461,44 @@ describe("asu encode (ejecutor falso)", () => {
             const estado = JSON.parse(readFileSync(join(temporales, "estado.json"), "utf8"));
             expect(estado.completados).toEqual(expect.arrayContaining(["mux-1080", "mux-396"]));
             expect(estado.completados).not.toContain("x264-720");
+        });
+
+        describe("CRC32 en el nombre final", () => {
+            const conCrcActivo = () => config({ rutaMegui: dirname(dirname(dirname(hReal.ffmpeg))), crcEnNombre: true });
+            const finalesEnSalida = () => readdirSync(salida).filter((n) => n.startsWith("[SyncRajo]")).sort();
+
+            test("cada final lleva el CRC32 de su contenido y queda en el registro", async () => {
+                conCrcActivo();
+                expect(await correr({ solo: ["1080"] })).toBe(0);
+
+                const [final, ...otros] = finalesEnSalida();
+                expect(otros).toHaveLength(0);
+                expect(final).toMatch(/^\[SyncRajo\] Serie de Prueba - 01 \(HDTV 1920x1080\) \[[0-9A-F]{8}\]\.mp4$/);
+                const crc = formatearCrc(crc32(readFileSync(join(salida, final!))));
+                expect(final).toContain(`[${crc}]`);
+
+                const registro = readdirSync(join(dir, ".asu", "registros"))[0]!;
+                expect(readFileSync(join(dir, ".asu", "registros", registro), "utf8")).toContain(`CRC32 ${crc}`);
+            });
+
+            test("un final anterior con otro CRC o sin CRC cuenta como existente; con -f se reemplazan todos", async () => {
+                conCrcActivo();
+                mkdirSync(salida, { recursive: true });
+                const viejoConCrc = join(salida, "[SyncRajo] Serie de Prueba - 01 (HDTV 1920x1080) [DEADBEEF].mp4");
+                const viejoSinCrc = finales.mp4_1080();
+                const otraVersion = join(salida, "[SyncRajo] Serie de Prueba - 01 (HDTV 1280x720) [DEADBEEF].mp4");
+                for (const ruta of [viejoConCrc, viejoSinCrc, otraVersion]) writeFileSync(ruta, "viejo");
+
+                // Se detecta antes de codificar.
+                await expect(correr({ solo: ["1080"] })).rejects.toThrow("[DEADBEEF].mp4");
+                expect(llamadasCon("x264.exe")).toHaveLength(0);
+
+                expect(await correr({ solo: ["1080"], forzar: true })).toBe(0);
+                expect(existsSync(viejoConCrc)).toBe(false);
+                expect(existsSync(viejoSinCrc)).toBe(false);
+                expect(existsSync(otraVersion)).toBe(true);
+                expect(finalesEnSalida().filter((n) => n.includes("1920x1080"))).toHaveLength(1);
+            });
         });
 
         describe("registro y vigilante", () => {

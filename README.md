@@ -39,7 +39,7 @@ bun unlink
 
 ### Menú contextual del Explorador (opcional)
 
-Agrega "Asu" al clic derecho sobre una carpeta y sobre el fondo de una carpeta abierta, con subopciones: Menú…, Encode, Comparar, Verificar fuentes, AVS de trabajo, AVS de compresión, Unir subtítulos y Corregir offset. Cada una abre Windows Terminal maximizado (o cmd si no está) en esa carpeta y ejecuta `asu`; al terminar, queda abierta una consola `cmd` en esa carpeta para seguir escribiendo comandos (de asu o cualquier otro; `exit` la cierra). "Comparar" abre el submenú Nueva comparación / Abrir una comparación. No pide administrador (escribe en `HKCU`).
+Agrega "Asu" al clic derecho sobre una carpeta y sobre el fondo de una carpeta abierta, con subopciones: Menú…, Encode, Comparar, Verificar fuentes, CRC, AVS de trabajo, AVS de compresión, Unir subtítulos y Corregir offset. Cada una abre Windows Terminal maximizado (o cmd si no está) en esa carpeta y ejecuta `asu`; al terminar, queda abierta una consola `cmd` en esa carpeta para seguir escribiendo comandos (de asu o cualquier otro; `exit` la cierra). "Comparar" abre el submenú Nueva comparación / Abrir una comparación. No pide administrador (escribe en `HKCU`).
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\menu-contextual.ps1
@@ -61,6 +61,7 @@ asu unir [dir] -s a.ass -s b.ass      # une .ass en Unificado.ass
 asu reescalar [dir] -s a.ass -r 1920x1080   # crea "a - 1920x1080.ass"
 asu encode [dir]                      # encode completo del episodio
 asu comparar [dir]                    # prueba A/B de ajustes de x264
+asu crc [carpeta|archivo]             # calcula el CRC32 y lo compara con el del nombre
 asu config preajustes                 # lista preajustes
 asu --help                            # ayuda general
 asu <comando> --help                  # ayuda de un comando
@@ -107,6 +108,25 @@ Para cada `.ass`, junta las fuentes usadas por las líneas `Dialogue`: las de lo
 La comparación ignora mayúsculas y el `@` de las fuentes verticales. Termina con código 1 si falta alguna fuente o algún `.ass` no se pudo leer.
 
 La primera ejecución lee todas las fuentes instaladas (unos segundos). Después usa un cache que solo vuelve a leer archivos nuevos o modificados.
+
+### crc
+
+```powershell
+asu crc [carpeta | archivo]...
+```
+
+`asu crc` solo, en una terminal (y en el menú o el menú contextual), muestra un submenú:
+
+- **Calcular CRC** (por defecto): lista los archivos de la carpeta actual (sin subcarpetas, ninguno marcado; los que traen CRC en el nombre dicen "tiene CRC"). Marcas los que quieras y se muestra `ABCD1234  nombre` para cada uno; si el nombre trae `[XXXXXXXX]`, además dice `OK` o `NO COINCIDE`.
+- **Verificar la carpeta**: lo mismo que `asu crc .`, descrito abajo.
+
+Con argumentos (o sin terminal), recalcula el CRC32 de cada archivo y lo compara con el que lleva al final del nombre (`[SyncRajo] Serie - 01 (HDTV 1920x1080) [ABCD1234].mp4`, el formato habitual de los grupos de fansub). Si no coincide, el archivo está corrupto o fue modificado, por ejemplo por una descarga cortada o un disco dañado. Detecta daños accidentales, no manipulación intencional.
+
+- Carpeta (por defecto, la actual): revisa los archivos con `[XXXXXXXX]` al final del nombre, sin entrar en subcarpetas. Sirve también para releases de otros grupos.
+- Archivo sin CRC en el nombre: solo muestra el CRC32 calculado.
+- Termina con código 1 si alguno no coincide o no hay archivos con CRC.
+
+Lee por trozos, sin cargar el archivo entero en memoria. También está en el menú ("CRC de archivos") y en el menú contextual ("CRC").
 
 ### unir
 
@@ -179,7 +199,7 @@ Para cada versión elegida:
    - Audio del AVI: siempre MP3 con `lame`, normalizado igual.
    - MP4: `ffmpeg | x264` y `mp4box` con el audio marcado en japonés.
    - AVI: `xvid_encraw` en 2 pasadas, con el bitrate calculado para no superar el tamaño máximo (descuenta el audio real y la sobrecarga del AVI, con 1 % de margen), y `AVI-Mux GUI` con el MP3.
-5. Deja `[<grupo>] <serie> - <ep> (<fuente> <ancho>x<alto>).<ext>` en la carpeta de salida, por ejemplo `[SyncRajo] Serie (2026) - 04 (HDTV 1920x1080).mp4`.
+5. Calcula el CRC32 de cada archivo terminado y lo deja como `[<grupo>] <serie> - <ep> (<fuente> <ancho>x<alto>) [<CRC32>].<ext>` en la carpeta de salida, por ejemplo `[SyncRajo] Serie (2026) - 04 (HDTV 1920x1080) [ABCD1234].mp4`. Con el CRC en el nombre se puede comprobar después que el archivo no esté corrupto (`asu crc`). Para no ponerlo: `"crcEnNombre": false` en `config.json`.
 6. Verifica que el AVI no supere el tamaño máximo (si lo supera, termina con error y no vuelve a codificar) y borra los temporales.
 
 Detalles:
@@ -189,7 +209,7 @@ Detalles:
 - **Carpeta de MeGUI y carpeta de salida**: se piden la primera vez y se guardan en la config (`asu config megui`, `asu config carpeta-salida`). `--carpeta-salida` la cambia solo para ese encode.
 - **Temporales**: van en `<carpeta de salida>\.asu-encode\<serie> - <ep>\`. Se borran solo si todo terminó bien, salvo `--conservar`.
 - **Si se corta**: los pasos terminados quedan registrados. Con `--reanudar` se retoma desde el que faltaba; con `--reiniciar` se empieza de cero. En el menú se pregunta. No se puede reanudar si cambiaron el raw, la pista, los `.avs` o las versiones elegidas.
-- **Archivo final existente**: en el menú, sobrescribir / otro nombre / cancelar; por argumentos, error salvo `-f`. Se resuelve antes de empezar a codificar.
+- **Archivo final existente**: cuenta cualquier final del mismo episodio y versión, con cualquier CRC o sin él (así no quedan dos con distinto CRC). En el menú se ofrece sobrescribir / otro nombre / cancelar; por argumentos es un error salvo `-f`. Se resuelve antes de empezar a codificar; los anteriores se borran recién al mover el nuevo.
 - **En paralelo**: x264 no ocupa toda la CPU (lo frena la entrada del `.avs`, que decodifica, dibuja subtítulos y redimensiona en un hilo) y XviD usa un hilo. Con las 3 versiones a la vez, una muestra de 60 s tardó 33 s contra 70 s en secuencia. Se cambia con `asu config paralelo N` o, para un encode, `--paralelo N`; `1` = en secuencia.
 - **Pantalla**: una línea por versión con su paso, frames, % aproximado (según la duración del `.avs`) y fps. La salida de las herramientas no se muestra mientras corren; si una falla, el error trae sus últimas líneas.
 - **Si una versión falla**, las demás siguen hasta terminar (su trabajo queda registrado), no se mueve ningún archivo final y `--reanudar` hace solo lo que faltó.
@@ -297,9 +317,9 @@ Por qué estos valores (medido sobre 60 s de un episodio):
 - XviD sin `-turbo` y con 4 hilos: misma calidad (SSIM 0,9884) y algo más rápido. `-vhqmode 4` daba +0,12 dB de PSNR por un 30 % más de tiempo, así que queda en 1.
 - Los `.avs` de compresión usan `FFVideoSource(threads=-1)`: la entrada del 720 pasó de 71 a 141 fps con frames idénticos.
 
-Si tu `config.json` es de una versión anterior, se migra solo la primera vez que corres `asu`: x264 recibe `preset: "slow"` y las banderas de XviD viejas de fábrica pasan a las nuevas. Si las editaste a mano, no se tocan y se avisa.
+Si tu `config.json` es de una versión anterior, se migra solo la primera vez que corres `asu`: x264 recibe `preset: "slow"` y las banderas de XviD viejas de fábrica pasan a las nuevas (si las editaste a mano, no se tocan y se avisa); desde la versión 3 se agrega `crcEnNombre: true` (con aviso).
 
-Los ajustes de x264 (incluido `extra`, una lista de argumentos adicionales, y `tune: ""` para no usar `--tune`), XviD, audio, tamaño máximo y el grupo (`SyncRajo`) se editan a mano en `config.json`. Se pueden agregar salidas nuevas copiando una existente (con otro `nombre` y un `preajuste` existente).
+Los ajustes de x264 (incluido `extra`, una lista de argumentos adicionales, y `tune: ""` para no usar `--tune`), XviD, audio, tamaño máximo, el grupo (`SyncRajo`) y `crcEnNombre` (CRC32 en el nombre final, `true` de fábrica) se editan a mano en `config.json`. Se pueden agregar salidas nuevas copiando una existente (con otro `nombre` y un `preajuste` existente).
 
 ## Archivos `.avs`
 
@@ -312,7 +332,7 @@ Los ajustes de x264 (incluido `extra`, una lista de argumentos adicionales, y `t
 
 Vive en `%USERPROFILE%\.asu-cli\`:
 
-- `config.json`: preajustes, salidas de encode, variantes de x264, carpeta de MeGUI, carpeta de salida, grupo y `paralelo`. Se crea al modificar algo; mientras no exista se usan los valores de fábrica, y las claves que falten se completan con ellos. Se puede editar a mano.
+- `config.json`: preajustes, salidas de encode, variantes de x264, carpeta de MeGUI, carpeta de salida, grupo, `paralelo` y `crcEnNombre`. Se crea al modificar algo; mientras no exista se usan los valores de fábrica, y las claves que falten se completan con ellos. Se puede editar a mano.
 - `cache-fuentes.json`: nombres de las fuentes instaladas. Se puede borrar sin problema; se reconstruye.
 
 ## Desarrollo
@@ -343,6 +363,7 @@ src/
   lista-ordenable.ts  prompt propio de lista reordenable (@clack/core)
   ejecutor.ts       ejecución de procesos y tuberías (encode), con vigilante de cuelgues
   registro.ts       registro de comandos (encode y comparar) y reintento ante cuelgues
+  crc.ts            CRC32 de un archivo, leído por trozos
   servidor-comparacion.ts  servidor local de asu comparar (127.0.0.1 + token)
   comandos/         cada herramienta (I/O e interacción)
   nucleo/           lógica pura: generación de AVS, fuentes, unión y reescalado de .ass, nombres,

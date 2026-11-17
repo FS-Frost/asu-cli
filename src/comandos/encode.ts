@@ -40,7 +40,8 @@ import {
     type Paso,
     type PistaAudio,
 } from "../nucleo/encode.ts";
-import { nombreAvs, nombreFinal, type SerieEpisodio } from "../nucleo/nombres.ts";
+import { conCrc, esMismoFinal, nombreAvs, nombreFinal, type SerieEpisodio } from "../nucleo/nombres.ts";
+import { crc32Archivo } from "../crc.ts";
 import {
     buscarProyecto,
     guardarEleccionesEncode,
@@ -48,14 +49,13 @@ import {
     leerEleccionesEncode,
     type EleccionesEncode,
 } from "../nucleo/proyecto.ts";
-import { EXTENSIONES_ASS, listarArchivos } from "../nucleo/archivos.ts";
+import { EXTENSIONES_ASS, conExtension, listarArchivos, validarNombreArchivo } from "../nucleo/archivos.ts";
 import { ErrorUsuario, confirmar, elegir, elegirVarios, esInteractivo, preguntarTexto } from "../ui.ts";
 import {
     codificarAvs,
     elegirVideo,
     ordenarArchivos,
     resolverArchivosAss,
-    resolverDestino,
     resolverDirectorio,
     resolverSerieEpisodio,
     type OpcionesSerieEpisodio,
@@ -735,6 +735,46 @@ async function ejecutarCadena(cadena: Cadena, ctx: Contexto, panel: PanelAvance,
     }
 }
 
+/**
+ * Destino de un archivo final, antes de codificar (el CRC aún no se conoce). Cuenta como existente
+ * cualquier final con el mismo nombre, con o sin CRC: sobrescribir (o `forzar`) los reemplaza a
+ * todos al mover el nuevo. `final` va sin CRC; `null` = cancelado.
+ */
+async function resolverFinal(
+    carpeta: string,
+    nombre: string,
+    extensionFinal: string,
+    forzar: boolean,
+): Promise<{ final: string; reemplazar: string[] } | null> {
+    let archivo = `${nombre}${extensionFinal}`;
+    while (true) {
+        const previos = existsSync(carpeta)
+            ? readdirSync(carpeta).filter((n) => esMismoFinal(n, archivo)).map((n) => join(carpeta, n))
+            : [];
+        if (previos.length === 0 || forzar) {
+            return { final: join(carpeta, archivo), reemplazar: previos };
+        }
+
+        const lista = previos.map((ruta) => basename(ruta)).join(", ");
+        if (!esInteractivo()) {
+            throw new ErrorUsuario(`${lista} ya existe. Usa --forzar para sobrescribirlo.`);
+        }
+
+        const accion = await elegir(`${lista} ya existe. ¿Qué hago?`, [
+            { value: "sobrescribir", label: "Sobrescribir", hint: "se reemplaza al terminar el encode" },
+            { value: "renombrar", label: "Crear con otro nombre" },
+            { value: "cancelar", label: "Cancelar" },
+        ]);
+        if (accion === "sobrescribir") {
+            return { final: join(carpeta, archivo), reemplazar: previos };
+        }
+        if (accion === "cancelar") {
+            return null;
+        }
+        archivo = conExtension(await preguntarTexto("Nombre del nuevo archivo", { validar: validarNombreArchivo }), extensionFinal);
+    }
+}
+
 // ---- Comando ----
 
 /**
@@ -789,16 +829,19 @@ async function encodeConRegistro(opciones: OpcionesEncode, ejecutorBase: Ejecuto
     mkdirSync(carpetaSalida, { recursive: true });
     const dirTemporal = join(carpetaSalida, CARPETA_TEMPORALES, `${serieEpisodio.serie} - ${serieEpisodio.episodio}`);
     const archivos: ArchivosSalida[] = [];
+    // Finales anteriores (con cualquier CRC o sin él) que se borran al mover el nuevo.
+    const reemplazos = new Map<Salida, string[]>();
     for (const salida of salidas) {
         const preajuste = buscarPreajuste(config, salida.preajuste)!;
         const nombre = nombreFinal({ ...serieEpisodio, grupo: config.grupo, fuente, ancho: preajuste.ancho, alto: preajuste.alto });
-        const final = await resolverDestino(carpetaSalida, nombre, { forzar: opciones.forzar }, extension(salida));
-        if (final === null) {
+        const destino = await resolverFinal(carpetaSalida, nombre, extension(salida), opciones.forzar ?? false);
+        if (destino === null) {
             p.log.warn("Encode cancelado.");
             return 1;
         }
 
-        archivos.push({ salida, avs: avs.get(salida)!, final, temporal: join(dirTemporal, `${salida.nombre}${extension(salida)}`) });
+        reemplazos.set(salida, destino.reemplazar);
+        archivos.push({ salida, avs: avs.get(salida)!, final: destino.final, temporal: join(dirTemporal, `${salida.nombre}${extension(salida)}`) });
     }
 
     const estado = await prepararEstado(dirTemporal, firmaTrabajo(video, pista.indice, archivos), opciones);
@@ -881,16 +924,26 @@ async function encodeConRegistro(opciones: OpcionesEncode, ejecutorBase: Ejecuto
         throw error;
     }
 
+    if (config.crcEnNombre) {
+        p.log.step("Calculando el CRC32 de los archivos finales...");
+    }
     let excedidos = 0;
     for (const a of archivos) {
-        rmSync(a.final, { force: true });
-        renameSync(a.temporal, a.final);
-        const { size } = statSync(a.final);
+        // El CRC se calcula sobre el archivo terminado; ponerlo en el nombre no cambia su contenido.
+        const crc = config.crcEnNombre ? await crc32Archivo(a.temporal) : null;
+        const final = crc ? conCrc(a.final, crc) : a.final;
+        for (const previo of [...(reemplazos.get(a.salida) ?? []), final]) {
+            rmSync(previo, { force: true });
+        }
+        renameSync(a.temporal, final);
+        registro.escribir(`Final ${a.salida.nombre}: ${final}${crc ? ` (CRC32 ${crc})` : ""}`);
+
+        const { size } = statSync(final);
         if (a.salida.tipo === "avi-xvid" && superaTamano(size, a.salida.tamanoMB)) {
-            p.log.error(`${basename(a.final)} pesa ${(size / 1024 / 1024).toFixed(1)} MB: supera el límite de ${a.salida.tamanoMB} MB.`);
+            p.log.error(`${basename(final)} pesa ${(size / 1024 / 1024).toFixed(1)} MB: supera el límite de ${a.salida.tamanoMB} MB.`);
             excedidos++;
         } else {
-            p.log.success(`${basename(a.final)} (${(size / 1024 / 1024).toFixed(1)} MB)`);
+            p.log.success(`${basename(final)} (${(size / 1024 / 1024).toFixed(1)} MB)`);
         }
     }
 

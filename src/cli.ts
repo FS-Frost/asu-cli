@@ -8,6 +8,7 @@ import {
     AYUDA_COMPARAR,
     AYUDA_CONFIG,
     AYUDA_CORREGIR_OFFSET,
+    AYUDA_CRC,
     AYUDA_ENCODE,
     AYUDA_FUENTES,
     AYUDA_GENERAL,
@@ -32,11 +33,12 @@ import {
 } from "./comandos/config.ts";
 import { abrirComparacion, comparar } from "./comandos/comparar.ts";
 import { corregirOffset } from "./comandos/corregir-offset.ts";
+import { verificarCrc } from "./comandos/crc.ts";
 import { encode } from "./comandos/encode.ts";
 import { reescalarArchivos } from "./comandos/reescalar.ts";
 import { unirArchivos } from "./comandos/unir.ts";
 import { verificarFuentes } from "./comandos/verificar-fuentes.ts";
-import { menu, menuComparar } from "./menu.ts";
+import { menu, menuComparar, menuCrc } from "./menu.ts";
 import { Cancelado, ErrorUsuario, esInteractivo } from "./ui.ts";
 
 const OPCION_AYUDA = { help: { type: "boolean", short: "h" } } as const;
@@ -184,6 +186,20 @@ async function ejecutar(argv: string[]): Promise<number> {
             }
 
             return verificarFuentes({ dir: directorioUnico(comando, positionals) });
+        }
+
+        case "crc": {
+            // Sin nada más y con terminal: el submenú (calcular eligiendo archivos, o verificar la carpeta).
+            if (args.length === 0 && esInteractivo()) {
+                return menuCrc();
+            }
+
+            const { values, positionals } = parsear(comando, args, {});
+            if (values.help) {
+                return ayuda(AYUDA_CRC);
+            }
+
+            return verificarCrc({ rutas: positionals });
         }
 
         case "reescalar": {

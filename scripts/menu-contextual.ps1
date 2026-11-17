@@ -37,6 +37,7 @@ $entradas = @(
     @{ Nombre = 'Encode';            Argumentos = 'encode' },
     @{ Nombre = 'Comparar';          Argumentos = 'comparar' },
     @{ Nombre = 'Verificar fuentes'; Argumentos = 'fuentes' },
+    @{ Nombre = 'CRC';               Argumentos = 'crc' },
     @{ Nombre = 'AVS de trabajo';    Argumentos = 'avs-trabajo' },
     @{ Nombre = 'AVS de compresión'; Argumentos = 'avs-compresion' },
     @{ Nombre = 'Unir subtítulos';   Argumentos = 'unir' },
