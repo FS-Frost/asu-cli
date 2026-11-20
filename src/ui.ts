@@ -1,4 +1,5 @@
 import * as p from "@clack/prompts";
+import { ListaMarcablePrompt, type ElementoMarcable } from "./lista-marcable.ts";
 import { ListaOrdenablePrompt, type ElementoLista } from "./lista-ordenable.ts";
 
 /** Error esperado (entrada inválida, archivo faltante...): se muestra el mensaje sin stack. */
@@ -64,6 +65,16 @@ export async function preguntarTexto(
         validate: opciones.validar ? (valor) => opciones.validar!(valor ?? "") : undefined,
     });
     return sinCancelar(resultado);
+}
+
+/** Lista para marcar varios con atajos (ver `ListaMarcablePrompt`). Devuelve los marcados, en el orden de la lista. */
+export async function marcarLista<T>(
+    mensaje: string,
+    elementos: ElementoMarcable<T>[],
+    marcados: T[],
+    teclaDestacados?: string,
+): Promise<T[]> {
+    return sinCancelar(await new ListaMarcablePrompt({ mensaje, elementos, marcados, teclaDestacados }).prompt()) ?? [];
 }
 
 /** Lista reordenable (ver `ListaOrdenablePrompt`). Devuelve los valores en el orden final. */

@@ -62,17 +62,25 @@ Opciones:
 
 export const AYUDA_CRC = `Uso: asu crc [carpeta | archivo]...
 
-"asu crc" solo, en una terminal, muestra un submenú:
-- Calcular CRC (por defecto): eliges archivos de la carpeta actual (ninguno marcado) y se
-  muestra el CRC32 de cada uno; los que traen [XXXXXXXX] en el nombre además se comparan.
-- Verificar la carpeta: lo mismo que "asu crc ." (abajo).
+"asu crc" solo, en una terminal, muestra los archivos de la carpeta actual (sin subcarpetas)
+con los que tienen CRC en el nombre ya marcados: Enter sin tocar nada = verificar la carpeta.
+Teclas: espacio marca uno, a todos, n ninguno, c solo los que tienen CRC, i invertir.
+Se muestra el CRC32 de cada marcado (y OK / NO COINCIDE si el nombre lo trae). Al final se
+ofrece agregar " [XXXXXXXX]" al nombre de los que no lo traían (todos marcados, mismas
+teclas; Esc no renombra nada; si el nombre nuevo ya existe, ese se salta).
 
 Con argumentos (o sin terminal), recalcula el CRC32 de cada archivo y lo compara con el que lleva en el nombre
 ("[SyncRajo] Serie - 01 (HDTV 1920x1080) [ABCD1234].mp4"). Si no coincide, el archivo
 está corrupto o fue modificado (detecta daños accidentales, no manipulación intencional).
 
-- Carpeta (por defecto, la actual): revisa los archivos con "[XXXXXXXX]" al final del nombre
-  (no recursivo). Sirve también para releases de otros grupos.
+CRC en el nombre (en cualquier parte, sin contar el [Grupo] del inicio ni la extensión):
+- "[XXXXXXXX]", en mayúsculas o minúsculas;
+- "XXXXXXXX" sin corchetes: solo en mayúsculas, con al menos una letra A-F (una fecha
+  20261120 no cuenta) y sin una letra o número pegado ("_22A92BA7" y "(22A92BA7)" sí).
+Si hay varios, gana uno con corchetes y, entre los del mismo tipo, el último.
+
+- Carpeta (por defecto, la actual): revisa los archivos con CRC en el nombre (no recursivo).
+  Sirve también para releases de otros grupos.
 - Archivo sin CRC en el nombre: solo muestra el CRC32 calculado.
 
 Termina con código 1 si alguno no coincide o no hay archivos con CRC.

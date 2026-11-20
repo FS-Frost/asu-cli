@@ -70,10 +70,29 @@ export function conCrc(ruta: string, crc: string): string {
     return `${ruta.slice(0, ruta.length - extension.length)} [${crc}]${extension}`;
 }
 
-/** CRC del final del nombre ("… [ABCD1234].mkv" o "…[abcd1234].mkv") en mayúsculas, o `null`. */
+export type CrcEnNombre = { crc: string; conCorchetes: boolean };
+
+/**
+ * CRC escrito en el nombre (sin la extensión), en mayúsculas, o `null`:
+ * - "[XXXXXXXX]" en cualquier parte, mayúsculas o minúsculas;
+ * - "XXXXXXXX" suelto: solo mayúsculas, con al menos una letra A-F (una fecha "20261120" no
+ *   cuenta) y sin una letra o número pegado antes o después ("_22A92BA7", "(22A92BA7)").
+ * El primer "[…]" pegado al inicio es el grupo y no cuenta. Con varios candidatos gana uno con
+ * corchetes y, entre los del mismo tipo, el último.
+ */
+export function buscarCrc(ruta: string): CrcEnNombre | null {
+    const nombre = basename(ruta, extname(ruta)).replace(/^\s*\[[^\]]*\]/, " ");
+    const conCorchetes = [...nombre.matchAll(/\[([0-9a-f]{8})\]/gi)].at(-1);
+    if (conCorchetes) {
+        return { crc: conCorchetes[1]!.toUpperCase(), conCorchetes: true };
+    }
+    const suelto = [...nombre.matchAll(/(?<![\p{L}\p{N}])([0-9A-F]{8})(?![\p{L}\p{N}])/gu)].filter((c) => /[A-F]/.test(c[1]!)).at(-1);
+    return suelto ? { crc: suelto[1]!, conCorchetes: false } : null;
+}
+
+/** Solo el CRC de `buscarCrc`. */
 export function crcDelNombre(ruta: string): string | null {
-    const coincidencia = basename(ruta, extname(ruta)).match(/\[([0-9a-f]{8})\]\s*$/i);
-    return coincidencia ? coincidencia[1]!.toUpperCase() : null;
+    return buscarCrc(ruta)?.crc ?? null;
 }
 
 /** ¿`archivo` es el final `nombre` (con extensión, sin CRC), sin CRC o con cualquier CRC? Sin distinguir mayúsculas. */

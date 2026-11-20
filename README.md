@@ -115,14 +115,29 @@ La primera ejecución lee todas las fuentes instaladas (unos segundos). Después
 asu crc [carpeta | archivo]...
 ```
 
-`asu crc` solo, en una terminal (y en el menú o el menú contextual), muestra un submenú:
+`asu crc` solo, en una terminal (y en el menú o el menú contextual), muestra la lista de archivos de la carpeta actual (sin subcarpetas, en orden alfabético). **Los que tienen CRC en el nombre vienen marcados**, con el CRC leído como pista (`CRC 22A92BA7` o `CRC 22A92BA7, sin corchetes`): Enter sin tocar nada verifica la carpeta; para calcular el CRC de otros, márcalos.
 
-- **Calcular CRC** (por defecto): lista los archivos de la carpeta actual (sin subcarpetas, ninguno marcado; los que traen CRC en el nombre dicen "tiene CRC"). Marcas los que quieras y se muestra `ABCD1234  nombre` para cada uno; si el nombre trae `[XXXXXXXX]`, además dice `OK` o `NO COINCIDE`.
-- **Verificar la carpeta**: lo mismo que `asu crc .`, descrito abajo.
+| Tecla | Acción |
+|---|---|
+| ↑ / ↓ | navegar |
+| espacio | marcar / desmarcar el archivo del cursor |
+| `a` | marcar todos |
+| `n` | desmarcar todos (ninguno) |
+| `c` | marcar solo los que tienen CRC |
+| `i` | invertir la selección |
+| Enter / Esc | confirmar / cancelar |
 
-Con argumentos (o sin terminal), recalcula el CRC32 de cada archivo y lo compara con el que lleva al final del nombre (`[SyncRajo] Serie - 01 (HDTV 1920x1080) [ABCD1234].mp4`, el formato habitual de los grupos de fansub). Si no coincide, el archivo está corrupto o fue modificado, por ejemplo por una descarga cortada o un disco dañado. Detecta daños accidentales, no manipulación intencional.
+Se muestra `ABCD1234  nombre` para cada marcado; si el nombre trae un CRC, además dice `OK` o `NO COINCIDE`. Al final, si alguno no traía CRC, aparece "Agregar el CRC al nombre de" con todos marcados (mismas teclas, sin `c`): Enter los renombra a `nombre [ABCD1234].ext` y Esc no renombra nada. Si el nombre nuevo ya existe o el archivo no se puede renombrar (por ejemplo, porque está abierto), ese se salta con un aviso. A los que traen un CRC que no coincide no se les ofrece.
 
-- Carpeta (por defecto, la actual): revisa los archivos con `[XXXXXXXX]` al final del nombre, sin entrar en subcarpetas. Sirve también para releases de otros grupos.
+Con argumentos (o sin terminal), recalcula el CRC32 de cada archivo y lo compara con el que lleva en el nombre (`[SyncRajo] Serie - 01 (HDTV 1920x1080) [ABCD1234].mp4`, el formato habitual de los grupos de fansub). Si no coincide, el archivo está corrupto o fue modificado, por ejemplo por una descarga cortada o un disco dañado. Detecta daños accidentales, no manipulación intencional.
+
+**Qué cuenta como CRC en el nombre** (en cualquier parte, sin contar el `[Grupo]` del inicio ni la extensión):
+
+- `[XXXXXXXX]`, en mayúsculas o minúsculas: `… [1080p][22a92ba7].mkv`.
+- `XXXXXXXX` sin corchetes: solo en mayúsculas, con al menos una letra A–F y sin una letra o número pegado: `…_(22A92BA7).mkv`, `… - 01 22A92BA7.mkv`. Una fecha como `20261120` no cuenta (con corchetes sí).
+- Si hay varios, gana uno con corchetes y, entre los del mismo tipo, el último. La línea dice "(sin corchetes)" cuando lo leyó así.
+
+- Carpeta (por defecto, la actual): revisa los archivos con CRC en el nombre, sin entrar en subcarpetas. Sirve también para releases de otros grupos.
 - Archivo sin CRC en el nombre: solo muestra el CRC32 calculado.
 - Termina con código 1 si alguno no coincide o no hay archivos con CRC.
 
@@ -361,6 +376,7 @@ src/
   ayuda.ts          textos de --help
   ui.ts             prompts (@clack/prompts) y errores
   lista-ordenable.ts  prompt propio de lista reordenable (@clack/core)
+  lista-marcable.ts   prompt propio de lista para marcar con atajos a/n/c/i (@clack/core)
   ejecutor.ts       ejecución de procesos y tuberías (encode), con vigilante de cuelgues
   registro.ts       registro de comandos (encode y comparar) y reintento ante cuelgues
   crc.ts            CRC32 de un archivo, leído por trozos

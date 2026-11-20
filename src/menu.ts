@@ -19,7 +19,7 @@ import {
 } from "./comandos/config.ts";
 import { CARPETA_COMPARACIONES, abrirComparacion, comparar, listarComparaciones, resumenComparacion } from "./comandos/comparar.ts";
 import { corregirOffset } from "./comandos/corregir-offset.ts";
-import { calcularCrcElegidos, verificarCrc } from "./comandos/crc.ts";
+import { elegirYRevisarCrc } from "./comandos/crc.ts";
 import { encode } from "./comandos/encode.ts";
 import { reescalarArchivos } from "./comandos/reescalar.ts";
 import { unirArchivos } from "./comandos/unir.ts";
@@ -157,24 +157,6 @@ async function menuConfig(): Promise<void> {
     }
 }
 
-/** Submenú de CRC: calcular (elegir archivos, por defecto) o verificar la carpeta. También es `asu crc` sin argumentos, con terminal. */
-export async function menuCrc(): Promise<number> {
-    const accion = await elegir<"calcular" | "verificar" | "volver">("CRC32 de archivos", [
-        { value: "calcular", label: "Calcular CRC", hint: "eliges archivos de esta carpeta; los que traen CRC en el nombre se comparan" },
-        { value: "verificar", label: "Verificar la carpeta", hint: "todos los archivos con [XXXXXXXX] en el nombre" },
-        { value: "volver", label: "Volver" },
-    ]);
-
-    switch (accion) {
-        case "calcular":
-            return calcularCrcElegidos();
-        case "verificar":
-            return verificarCrc({});
-        case "volver":
-            return 0;
-    }
-}
-
 /** Submenú de comparar: nueva comparación o abrir una hecha. También es `asu comparar` sin argumentos, con terminal. */
 export async function menuComparar(): Promise<number> {
     const { carpetaSalida } = cargarConfig();
@@ -220,7 +202,7 @@ async function ejecutarAccion(accion: Exclude<Accion, "salir">): Promise<void> {
             await verificarFuentes({});
             break;
         case "crc":
-            await menuCrc();
+            await elegirYRevisarCrc();
             break;
         case "unir":
             await unirArchivos({});
@@ -258,7 +240,7 @@ export async function menu(version: string): Promise<number> {
                 { value: "avs-trabajo", label: "Crear AVS de trabajo" },
                 { value: "avs-compresion", label: "Crear AVS de compresión" },
                 { value: "fuentes", label: "Verificar fuentes" },
-                { value: "crc", label: "CRC de archivos (calcular / verificar)" },
+                { value: "crc", label: "CRC de archivos (calcular y verificar)" },
                 { value: "unir", label: "Unir archivos .ass" },
                 { value: "reescalar", label: "Reescalar resolución" },
                 { value: "corregir-offset", label: "Corregir offset del video" },

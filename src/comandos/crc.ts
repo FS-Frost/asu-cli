@@ -1,9 +1,10 @@
 import * as p from "@clack/prompts";
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, renameSync, statSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { crc32Archivo } from "../crc.ts";
-import { crcDelNombre } from "../nucleo/nombres.ts";
-import { ErrorUsuario, elegirVarios, esInteractivo } from "../ui.ts";
+import type { ElementoMarcable } from "../lista-marcable.ts";
+import { buscarCrc, conCrc, crcDelNombre } from "../nucleo/nombres.ts";
+import { Cancelado, ErrorUsuario, esInteractivo, marcarLista } from "../ui.ts";
 
 export type OpcionesCrc = {
     /** Carpetas o archivos; sin indicar, la carpeta actual. */
@@ -39,15 +40,21 @@ export function archivosDeCarpeta(dir: string): string[] {
         .sort((a, b) => a.localeCompare(b));
 }
 
+export type ArchivoSinCrc = { ruta: string; crc: string };
+
 /**
- * Calcula el CRC32 de cada archivo y lo muestra; si el nombre trae "[XXXXXXXX]", además lo compara.
- * Código 1 si alguno no coincide.
+ * Calcula el CRC32 de cada archivo y lo muestra; si el nombre trae un CRC (ver `buscarCrc`),
+ * además lo compara. Código 1 si alguno no coincide; `sinCrc` = los que no traían CRC, con el
+ * calculado.
  */
-export async function revisarArchivos(archivos: readonly string[]): Promise<number> {
+export async function revisarArchivos(archivos: readonly string[]): Promise<{ codigo: number; sinCrc: ArchivoSinCrc[] }> {
     let fallidos = 0;
+    const sinCrc: ArchivoSinCrc[] = [];
     for (const archivo of archivos) {
         const nombre = basename(archivo);
-        const esperado = crcDelNombre(archivo);
+        const enNombre = buscarCrc(archivo);
+        const esperado = enNombre?.crc ?? null;
+        const forma = enNombre && !enNombre.conCorchetes ? " (sin corchetes)" : "";
         const total = statSync(archivo).size;
         const spinner = esInteractivo() ? p.spinner() : null;
         spinner?.start(`${nombre}...`);
@@ -63,46 +70,108 @@ export async function revisarArchivos(archivos: readonly string[]): Promise<numb
 
         if (esperado === null) {
             p.log.info(`${calculado}  ${nombre}`);
+            sinCrc.push({ ruta: archivo, crc: calculado });
         } else if (esperado === calculado) {
-            p.log.success(`${calculado}  OK  ${nombre}`);
+            p.log.success(`${calculado}  OK  ${nombre}${forma}`);
         } else {
-            p.log.error(`${calculado}  NO COINCIDE  ${nombre}: el nombre dice ${esperado} (corrupto o modificado).`);
+            p.log.error(`${calculado}  NO COINCIDE  ${nombre}: el nombre dice ${esperado}${forma} (corrupto o modificado).`);
             fallidos++;
         }
     }
 
-    const conCrc = archivos.filter((archivo) => crcDelNombre(archivo) !== null).length;
+    const conCrc = archivos.length - sinCrc.length;
     if (fallidos > 0) {
         p.log.error(`${fallidos} de ${conCrc} no coinciden.`);
-        return 1;
+        return { codigo: 1, sinCrc };
     }
     if (conCrc > 0) {
         p.log.success(`${conCrc === 1 ? "El archivo con CRC coincide" : `Los ${conCrc} archivos con CRC coinciden`}.`);
     }
-    return 0;
+    return { codigo: 0, sinCrc };
 }
 
 /**
- * Opción por defecto del submenú de CRC: elegir archivos de la carpeta actual (ninguno marcado) y
- * calcular su CRC32; los que traen CRC en el nombre además se comparan.
+ * Renombra cada archivo a "nombre [XXXXXXXX].ext". Si el nombre nuevo ya existe o no se puede
+ * renombrar (p. ej. abierto en otro programa), avisa y sigue. Devuelve cuántos renombró.
  */
-export async function calcularCrcElegidos(dir = process.cwd()): Promise<number> {
+export function agregarCrcAlNombre(archivos: readonly ArchivoSinCrc[]): number {
+    let renombrados = 0;
+    for (const { ruta, crc } of archivos) {
+        const destino = conCrc(ruta, crc);
+        if (existsSync(destino)) {
+            p.log.warn(`${basename(ruta)}: no se renombró, ya existe ${basename(destino)}.`);
+            continue;
+        }
+        try {
+            renameSync(ruta, destino);
+            p.log.success(`${basename(ruta)} → ${basename(destino)}`);
+            renombrados++;
+        } catch (error) {
+            p.log.warn(`${basename(ruta)}: no se pudo renombrar (${(error as Error).message}).`);
+        }
+    }
+    return renombrados;
+}
+
+/**
+ * Elementos de la lista de CRC: todos los archivos, en orden; los que tienen CRC en el nombre van
+ * marcados y destacados (tecla `c`), con el CRC leído como pista.
+ */
+export function elementosListaCrc(archivos: readonly string[]): { elementos: ElementoMarcable<string>[]; marcados: string[] } {
+    const elementos = archivos.map((ruta) => {
+        const enNombre = buscarCrc(ruta);
+        return {
+            value: ruta,
+            label: basename(ruta),
+            hint: enNombre ? `CRC ${enNombre.crc}${enNombre.conCorchetes ? "" : ", sin corchetes"}` : undefined,
+            destacado: enNombre !== null,
+        };
+    });
+    return { elementos, marcados: elementos.filter((e) => e.destacado).map((e) => e.value) };
+}
+
+/**
+ * `asu crc` con terminal (menú y menú contextual): lista de los archivos de la carpeta actual con
+ * los que tienen CRC marcados (Enter = verificar la carpeta). Calcula el CRC32 de los marcados,
+ * compara los que traen CRC y al final ofrece agregar " [XXXXXXXX]" al nombre de los que no lo
+ * traían (todos marcados).
+ */
+export async function elegirYRevisarCrc(dir = process.cwd()): Promise<number> {
     const archivos = archivosDeCarpeta(dir);
     if (archivos.length === 0) {
         p.log.warn(`No hay archivos en ${dir}.`);
         return 1;
     }
 
-    const elegidos = await elegirVarios(
-        "Archivos para calcular el CRC32 (espacio marca, Enter confirma)",
-        archivos.map((ruta) => ({ value: ruta, label: basename(ruta), hint: crcDelNombre(ruta) ? "tiene CRC: se compara" : undefined })),
-        [],
-    );
+    const { elementos, marcados: conCrcEnNombre } = elementosListaCrc(archivos);
+    const elegidos = await marcarLista("Archivos para calcular el CRC32 (los que tienen CRC se comparan)", elementos, conCrcEnNombre, "solo con CRC");
     if (elegidos.length === 0) {
         p.log.warn("No elegiste ningún archivo.");
         return 1;
     }
-    return revisarArchivos(elegidos);
+
+    const { codigo, sinCrc } = await revisarArchivos(elegidos);
+    if (sinCrc.length > 0) {
+        let marcados: string[];
+        try {
+            marcados = await marcarLista(
+                "Agregar el CRC al nombre de (Enter renombra, Esc no renombra nada)",
+                sinCrc.map(({ ruta, crc }) => ({ value: ruta, label: basename(ruta), hint: basename(conCrc(ruta, crc)) })),
+                sinCrc.map(({ ruta }) => ruta),
+            );
+        } catch (error) {
+            if (!(error instanceof Cancelado)) {
+                throw error;
+            }
+            marcados = [];
+        }
+        if (marcados.length > 0) {
+            agregarCrcAlNombre(sinCrc.filter(({ ruta }) => marcados.includes(ruta)));
+        } else {
+            p.log.info("No se renombró ningún archivo.");
+        }
+    }
+    return codigo;
 }
 
 /**
@@ -116,5 +185,5 @@ export async function verificarCrc(opciones: OpcionesCrc): Promise<number> {
         p.log.warn(`No hay archivos con CRC en el nombre ("… [ABCD1234].mp4") en ${rutas.map((r) => resolve(r)).join(", ")}.`);
         return 1;
     }
-    return revisarArchivos(archivos);
+    return (await revisarArchivos(archivos)).codigo;
 }

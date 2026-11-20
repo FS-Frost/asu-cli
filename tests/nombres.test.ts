@@ -2,9 +2,10 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { crc32 } from "node:zlib";
-import { archivosDeCarpeta, revisarArchivos, verificarCrc } from "../src/comandos/crc.ts";
+import { agregarCrcAlNombre, archivosDeCarpeta, revisarArchivos, verificarCrc } from "../src/comandos/crc.ts";
 import { crc32Archivo } from "../src/crc.ts";
 import {
+    buscarCrc,
     conCrc,
     crcDelNombre,
     deducirSerieEpisodio,
@@ -36,6 +37,29 @@ describe("CRC en el nombre", () => {
         expect(crcDelNombre("[ABCDEF12] Serie - 01.mp4")).toBeNull();
         expect(crcDelNombre("[Grupo] Serie - 01 [1080p].mkv")).toBeNull();
         expect(crcDelNombre(FINAL)).toBeNull();
+    });
+
+    test("buscarCrc: con corchetes en cualquier parte; suelto solo en mayúsculas, con una letra y delimitado", () => {
+        expect(buscarCrc("[Grupo] Serie - 01 [1080p][22a92ba7].mkv")).toEqual({ crc: "22A92BA7", conCorchetes: true });
+        expect(buscarCrc("Serie [22A92BA7] - 01 (1080p).mkv")).toEqual({ crc: "22A92BA7", conCorchetes: true });
+        expect(buscarCrc("[Grupo]_Serie_-_01_(22A92BA7).mkv")).toEqual({ crc: "22A92BA7", conCorchetes: false });
+        expect(buscarCrc("Serie - 01 22A92BA7.mkv")).toEqual({ crc: "22A92BA7", conCorchetes: false });
+        expect(buscarCrc("Serie_22A92BA7_1080p.mkv")).toEqual({ crc: "22A92BA7", conCorchetes: false });
+        // Con corchetes gana; entre iguales, el último.
+        expect(buscarCrc("Serie 22A92BA7 [ABCD1234].mkv")?.crc).toBe("ABCD1234");
+        expect(buscarCrc("Serie AAAA1111 - BBBB2222.mkv")?.crc).toBe("BBBB2222");
+        expect(buscarCrc("Serie [AAAA1111] [BBBB2222].mkv")?.crc).toBe("BBBB2222");
+        // No cuentan: minúsculas sueltas, solo dígitos, pegado a letras/números, 9 hex seguidos, el grupo, la extensión.
+        expect(buscarCrc("Serie - 01 22a92ba7.mkv")).toBeNull();
+        expect(buscarCrc("Serie - 20261120.mkv")).toBeNull();
+        expect(buscarCrc("Serie - 01 x22A92BA7.mkv")).toBeNull();
+        expect(buscarCrc("Serie - 01 22A92BA7C.mkv")).toBeNull();
+        expect(buscarCrc("Serie - 01 22A92BÁ7AB.mkv")).toBeNull();
+        expect(buscarCrc("[22A92BA7] Serie - 01.mkv")).toBeNull();
+        expect(buscarCrc("[DEADBEEF]Serie - 01.mkv")).toBeNull();
+        // Con corchetes, solo dígitos sí cuenta.
+        expect(buscarCrc("Serie - 01 [20261120].mkv")?.crc).toBe("20261120");
+        expect(crcDelNombre("Serie - 01 22A92BA7.mkv")).toBe("22A92BA7");
     });
 
     test("esMismoFinal: el mismo nombre sin CRC o con cualquier CRC, sin distinguir mayúsculas", () => {
@@ -91,9 +115,42 @@ describe("crc32Archivo y asu crc", () => {
         mkdirSync(join(dir, "subcarpeta"));
         expect(archivosDeCarpeta(dir).map((ruta) => ruta.slice(dir.length + 1))).toEqual([`a [${crc}].mp4`, "b sin crc.mp4"]);
 
-        expect(await revisarArchivos(archivosDeCarpeta(dir))).toBe(0);
+        const bien = await revisarArchivos(archivosDeCarpeta(dir));
+        expect(bien.codigo).toBe(0);
+        expect(bien.sinCrc).toEqual([{ ruta: join(dir, "b sin crc.mp4"), crc: formatearCrc(crc32("x")) }]);
+
         writeFileSync(join(dir, "c [DEADBEEF].mp4"), "x");
-        expect(await revisarArchivos(archivosDeCarpeta(dir))).toBe(1);
+        writeFileSync(join(dir, "d DEADBEEF.mp4"), "x");
+        const mal = await revisarArchivos(archivosDeCarpeta(dir));
+        expect(mal.codigo).toBe(1);
+        // Los que traen un CRC que no coincide no se ofrecen para agregar.
+        expect(mal.sinCrc.map(({ ruta }) => ruta)).toEqual([join(dir, "b sin crc.mp4")]);
+    });
+
+    test("verificar la carpeta incluye el CRC sin corchetes", async () => {
+        writeFileSync(join(dir, `suelto ${crc}.mp4`), contenido);
+        expect(await verificarCrc({ rutas: [dir] })).toBe(0);
+        writeFileSync(join(dir, "suelto DEADBEEF.mp4"), contenido);
+        expect(await verificarCrc({ rutas: [dir] })).toBe(1);
+    });
+
+    test("agregarCrcAlNombre: renombra a 'nombre [CRC].ext'; si el destino existe, lo salta", () => {
+        writeFileSync(join(dir, "a.mkv"), "x");
+        writeFileSync(join(dir, "sin extension"), "x");
+        writeFileSync(join(dir, "b.mkv"), "x");
+        writeFileSync(join(dir, "b [ABCD1234].mkv"), "ya estaba");
+
+        expect(agregarCrcAlNombre([
+            { ruta: join(dir, "a.mkv"), crc: "22A92BA7" },
+            { ruta: join(dir, "sin extension"), crc: "22A92BA7" },
+            { ruta: join(dir, "b.mkv"), crc: "ABCD1234" },
+        ])).toBe(2);
+        expect(archivosDeCarpeta(dir).map((ruta) => ruta.slice(dir.length + 1))).toEqual([
+            "a [22A92BA7].mkv",
+            "b [ABCD1234].mkv",
+            "b.mkv",
+            "sin extension [22A92BA7]",
+        ]);
     });
 
     test("archivo indicado sin CRC en el nombre: solo informa (código 0); ruta inexistente: error", async () => {
