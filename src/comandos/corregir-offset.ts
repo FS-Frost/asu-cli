@@ -9,21 +9,14 @@ import {
     parsearPistasVideo,
 } from "../nucleo/offset.ts";
 import { ErrorUsuario } from "../ui.ts";
+import { contextoDeConfig, exigirHerramientas } from "../herramientas.ts";
+import { cargarConfig } from "../nucleo/config.ts";
 import { elegirVideo, resolverDestino, resolverDirectorio, type OpcionesDestino } from "./comun.ts";
 
 export type OpcionesCorregirOffset = OpcionesDestino & {
     dir?: string;
     video?: string;
 };
-
-function ejecutable(nombre: string, paquete: string): string {
-    const ruta = Bun.which(nombre);
-    if (!ruta) {
-        throw new ErrorUsuario(`No se encontró ${nombre} en el PATH (viene con ${paquete}).`);
-    }
-
-    return ruta;
-}
 
 async function correr(comando: string[]): Promise<{ codigo: number; salida: string }> {
     const proceso = Bun.spawn(comando, { stdout: "pipe", stderr: "pipe" });
@@ -38,12 +31,10 @@ async function correr(comando: string[]): Promise<{ codigo: number; salida: stri
 export async function corregirOffset(opciones: OpcionesCorregirOffset): Promise<number> {
     const dir = resolverDirectorio(opciones.dir);
     p.log.info(`Directorio: ${dir}`);
+    const { ffprobe, mkvmerge } = exigirHerramientas(["ffprobe", "mkvmerge"], contextoDeConfig(cargarConfig()), "asu corregir-offset");
 
     const video = await elegirVideo(dir, opciones.video);
     p.log.info(`Video: ${basename(video)}`);
-
-    const ffprobe = ejecutable("ffprobe", "FFmpeg");
-    const mkvmerge = ejecutable("mkvmerge", "MKVToolNix");
 
     const sonda = await correr([ffprobe, "-v", "error", "-select_streams", "V", "-show_entries", "stream=start_time", "-of", "json", video]);
     if (sonda.codigo !== 0) {

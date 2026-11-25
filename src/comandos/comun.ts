@@ -26,18 +26,18 @@ export function resolverArchivo(dir: string, archivo: string): string {
     return ruta;
 }
 
-/** Video indicado, el único del directorio, o el que elija el usuario si hay varios. */
-export async function elegirVideo(dir: string, video: string | undefined): Promise<string> {
+/** Video indicado, el único del directorio, o el que elija el usuario si hay varios (`extensiones`, por defecto todas las de video). */
+export async function elegirVideo(dir: string, video: string | undefined, extensiones: readonly string[] = EXTENSIONES_VIDEO): Promise<string> {
     if (video !== undefined) {
         const ruta = resolverArchivo(dir, video);
-        if (!EXTENSIONES_VIDEO.includes(extname(ruta).toLowerCase())) {
-            throw new ErrorUsuario(`No es un video soportado: ${basename(ruta)} (extensiones: ${EXTENSIONES_VIDEO.join(" ")})`);
+        if (!extensiones.includes(extname(ruta).toLowerCase())) {
+            throw new ErrorUsuario(`No es un video soportado: ${basename(ruta)} (extensiones: ${extensiones.join(" ")})`);
         }
 
         return ruta;
     }
 
-    const videos = listarArchivos(dir, EXTENSIONES_VIDEO);
+    const videos = listarArchivos(dir, extensiones);
     if (videos.length === 0) {
         throw new ErrorUsuario("No hay videos en el directorio.");
     }

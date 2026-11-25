@@ -37,7 +37,7 @@ import {
 } from "../src/nucleo/config.ts";
 import { comandosX264, herramientasDeMegui, type Comando } from "../src/nucleo/encode.ts";
 import { crearServidorComparacion } from "../src/servidor-comparacion.ts";
-import { construirASS, directorioTemporal } from "./utilidades.ts";
+import { construirASS, directorioTemporal, simularAvisynth } from "./utilidades.ts";
 
 const linea = (comando: Comando) => [comando.exe, ...comando.args].join(" ");
 const X264 = (configDeFabrica().salidas[0] as SalidaMp4).x264;
@@ -361,6 +361,7 @@ describe("asu comparar (ejecutor falso)", () => {
 
         process.env.ASU_CLI_HOME = join(base, "home");
         process.env.ASU_CLI_NO_INTERACTIVO = "1";
+        simularAvisynth(base);
         guardarConfig({ ...configDeFabrica(), rutaMegui: megui, carpetaSalida: salida });
         falso = ejecutorFalso(h);
         servidas = [];

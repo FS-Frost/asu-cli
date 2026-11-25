@@ -19,6 +19,10 @@ import {
 } from "./comandos/config.ts";
 import { CARPETA_COMPARACIONES, abrirComparacion, comparar, listarComparaciones, resumenComparacion } from "./comandos/comparar.ts";
 import { corregirOffset } from "./comandos/corregir-offset.ts";
+import { configurarCarpetaHerramienta, diagnosticarHerramientas } from "./comandos/herramientas.ts";
+import { extraerMkv } from "./comandos/mkv.ts";
+import { contextoDeConfig, faltantes } from "./herramientas.ts";
+import { NOMBRES_CARPETAS, mensajeFaltan, necesariasMenu, pistaFaltantes, type Faltante } from "./nucleo/herramientas.ts";
 import { elegirYRevisarCrc } from "./comandos/crc.ts";
 import { encode } from "./comandos/encode.ts";
 import { reescalarArchivos } from "./comandos/reescalar.ts";
@@ -28,7 +32,7 @@ import { validarNombreArchivo } from "./nucleo/archivos.ts";
 import { cargarConfig, parsearParalelo, parsearResolucion } from "./nucleo/config.ts";
 import { Cancelado, ErrorUsuario, confirmar, elegir, elegirVarios, esInteractivo, preguntarTexto } from "./ui.ts";
 
-type Accion = "avs-trabajo" | "avs-compresion" | "fuentes" | "crc" | "unir" | "reescalar" | "corregir-offset" | "encode" | "comparar" | "config" | "salir";
+type Accion = "avs-trabajo" | "avs-compresion" | "fuentes" | "crc" | "unir" | "reescalar" | "corregir-offset" | "mkv" | "encode" | "comparar" | "herramientas" | "config" | "salir";
 
 async function menuConfig(): Promise<void> {
     while (true) {
@@ -40,6 +44,7 @@ async function menuConfig(): Promise<void> {
             { value: "activar", label: "Activar/desactivar salidas de encode" },
             { value: "megui", label: "Carpeta de MeGUI" },
             { value: "carpeta-salida", label: "Carpeta de salida del encode" },
+            { value: "herramienta", label: "Carpetas de FFmpeg, MKVToolNix o plugins de AviSynth" },
             { value: "paralelo", label: "Versiones a la vez en el encode" },
             { value: "variantes", label: "Ver variantes de x264 (comparar)" },
             { value: "usar-variante", label: "Usar una variante en una salida" },
@@ -126,6 +131,19 @@ async function menuConfig(): Promise<void> {
                 break;
             }
 
+            case "herramienta": {
+                const { herramientas } = cargarConfig();
+                const nombre = await elegir("¿Cuál?", [
+                    { value: "ffmpeg", label: "FFmpeg (ffprobe)", hint: herramientas.ffmpeg ?? "PATH / ubicaciones típicas" },
+                    { value: "mkvtoolnix", label: "MKVToolNix (mkvmerge, mkvextract)", hint: herramientas.mkvtoolnix ?? "PATH / ubicaciones típicas" },
+                    { value: "avisynth-plugins", label: "Plugins de AviSynth (ffms2, VSFilter)", hint: herramientas.avisynthPlugins ?? "carpeta de fábrica" },
+                ]);
+                const actual = herramientas[NOMBRES_CARPETAS[nombre]!];
+                const ruta = await preguntarTexto("Carpeta (vacía = buscar donde siempre)", { inicial: actual ?? undefined });
+                configurarCarpetaHerramienta(nombre, ruta);
+                break;
+            }
+
             case "quitar": {
                 const { preajustes } = cargarConfig();
                 if (preajustes.length === 0) {
@@ -190,6 +208,24 @@ export async function menuComparar(): Promise<number> {
     }
 }
 
+/**
+ * Herramientas que le faltan a cada opción del menú. Las de MeGUI no cuentan si MeGUI no está
+ * configurado: el comando lo pregunta.
+ */
+function faltasPorAccion(): Map<Accion, Faltante[]> {
+    const config = cargarConfig();
+    const activas = config.salidas.filter((s) => s.activa);
+    const contexto = contextoDeConfig(config);
+    const mapa = new Map<Accion, Faltante[]>();
+    for (const accion of ["encode", "comparar", "mkv", "corregir-offset"] as const) {
+        const faltan = faltantes(necesariasMenu(accion, activas), contexto).filter((f) => config.rutaMegui !== null || f.definicion.grupo !== "megui");
+        if (faltan.length > 0) {
+            mapa.set(accion, faltan);
+        }
+    }
+    return mapa;
+}
+
 async function ejecutarAccion(accion: Exclude<Accion, "salir">): Promise<void> {
     switch (accion) {
         case "avs-trabajo":
@@ -213,11 +249,17 @@ async function ejecutarAccion(accion: Exclude<Accion, "salir">): Promise<void> {
         case "corregir-offset":
             await corregirOffset({});
             break;
+        case "mkv":
+            await extraerMkv({});
+            break;
         case "encode":
             await encode({});
             break;
         case "comparar":
             await menuComparar();
+            break;
+        case "herramientas":
+            await diagnosticarHerramientas();
             break;
         case "config":
             await menuConfig();
@@ -234,20 +276,25 @@ export async function menu(version: string): Promise<number> {
     p.intro(`asu ${version}`);
 
     while (true) {
+        // Se revisa en cada vuelta: la config (MeGUI, carpetas) puede haber cambiado. Solo existencia de archivos.
+        const faltas = faltasPorAccion();
+        const opcion = (value: Accion, label: string) => ({ value, label, hint: pistaFaltantes(faltas.get(value) ?? []) });
         let accion: Accion;
         try {
             accion = await elegir<Accion>("¿Qué quieres hacer?", [
-                { value: "avs-trabajo", label: "Crear AVS de trabajo" },
-                { value: "avs-compresion", label: "Crear AVS de compresión" },
-                { value: "fuentes", label: "Verificar fuentes" },
-                { value: "crc", label: "CRC de archivos (calcular y verificar)" },
-                { value: "unir", label: "Unir archivos .ass" },
-                { value: "reescalar", label: "Reescalar resolución" },
-                { value: "corregir-offset", label: "Corregir offset del video" },
-                { value: "encode", label: "Encode de episodio" },
-                { value: "comparar", label: "Comparar ajustes de x264" },
-                { value: "config", label: "Configuración" },
-                { value: "salir", label: "Salir" },
+                opcion("avs-trabajo", "Crear AVS de trabajo"),
+                opcion("avs-compresion", "Crear AVS de compresión"),
+                opcion("fuentes", "Verificar fuentes"),
+                opcion("crc", "CRC de archivos (calcular y verificar)"),
+                opcion("unir", "Unir archivos .ass"),
+                opcion("reescalar", "Reescalar resolución"),
+                opcion("corregir-offset", "Corregir offset del video"),
+                opcion("mkv", "Extraer de MKV (pistas y adjuntos)"),
+                opcion("encode", "Encode de episodio"),
+                opcion("comparar", "Comparar ajustes de x264"),
+                opcion("herramientas", "Revisar herramientas externas"),
+                opcion("config", "Configuración"),
+                opcion("salir", "Salir"),
             ]);
         } catch (error) {
             if (error instanceof Cancelado) {
@@ -258,6 +305,12 @@ export async function menu(version: string): Promise<number> {
 
         if (accion === "salir") {
             break;
+        }
+
+        const faltan = faltas.get(accion) ?? [];
+        if (faltan.length > 0) {
+            p.log.error(mensajeFaltan(faltan, `asu ${accion}`));
+            continue;
         }
 
         try {

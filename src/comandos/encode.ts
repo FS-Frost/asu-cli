@@ -6,6 +6,8 @@ import { ejecutorReal, type Ejecutor } from "../ejecutor.ts";
 import { generarAvsCompresion } from "../nucleo/avs.ts";
 import { buscarPreajuste, buscarSalida, cargarConfig, guardarConfig, parsearParalelo, type Config, type Salida } from "../nucleo/config.ts";
 import { LectorAvance, ejecutarConLimite, framesAproximados, ultimasLineas } from "../nucleo/avance.ts";
+import { contextoDeConfig, exigirHerramientas } from "../herramientas.ts";
+import { necesariasEncode, type ClaveHerramienta } from "../nucleo/herramientas.ts";
 import { PanelAvance } from "../panel-avance.ts";
 import { Registro, anotarError, ejecutarVigilado, ejecutorConRegistro, rutaRegistroEncode } from "../registro.ts";
 import {
@@ -287,19 +289,12 @@ export async function asegurarCarpetaSalida(config: Config, indicada: string | u
     return config.carpetaSalida;
 }
 
-export function verificarHerramientas(h: Herramientas, salidas: readonly Salida[]): void {
-    const necesarias: (keyof Herramientas)[] = ["ffmpeg"];
-    if (salidas.some((s) => s.tipo === "mp4-x264")) {
-        necesarias.push("x264", "neroAac", "mp4box");
-    }
-    if (salidas.some((s) => s.tipo === "avi-xvid")) {
-        necesarias.push("xvid", "lame", "avimux");
-    }
-
-    const faltantes = necesarias.map((clave) => h[clave]).filter((ruta) => !existsSync(ruta));
-    if (faltantes.length > 0) {
-        throw new ErrorUsuario(`Faltan herramientas de MeGUI:\n${faltantes.map((r) => `  ${r}`).join("\n")}`);
-    }
+/**
+ * Comprueba las herramientas de `claves` (MeGUI en `rutaMegui`, AviSynth y sus plugins...) antes de
+ * codificar; si falta alguna, error con qué falta y cómo instalarlo.
+ */
+export function verificarHerramientas(config: Config, rutaMegui: string, claves: readonly ClaveHerramienta[], comando: string): void {
+    exigirHerramientas(claves, contextoDeConfig(config, rutaMegui), comando);
 }
 
 async function resolverFuente(dir: string, indicada: string | undefined): Promise<string> {
@@ -803,8 +798,10 @@ async function encodeConRegistro(opciones: OpcionesEncode, ejecutorBase: Ejecuto
     const salidas = await elegirSalidas(config, opciones.solo, recuerdo);
     p.log.info(`Versiones: ${salidas.map((salida) => etiquetaSalida(config, salida)).join(", ")}`);
 
-    const h = herramientasDeMegui(await asegurarRutaMegui(config));
-    verificarHerramientas(h, salidas);
+    const rutaMegui = await asegurarRutaMegui(config);
+    const h = herramientasDeMegui(rutaMegui);
+    // Las de audio (neroAacEnc, lame) se comprueban al conocer la pista: el AAC copiado no las usa.
+    verificarHerramientas(config, rutaMegui, necesariasEncode(salidas, null), "asu encode");
     const carpetaSalida = await asegurarCarpetaSalida(config, opciones.carpetaSalida);
 
     const video = await elegirVideo(dir, opciones.video);
@@ -824,6 +821,7 @@ async function encodeConRegistro(opciones: OpcionesEncode, ejecutorBase: Ejecuto
 
     const pista = await elegirPista(ejecutor, h, video, opciones.pistaAudio, recuerdo);
     p.log.info(`Audio: pista ${pista.indice + 1} (${pista.idioma ?? "sin idioma"})`);
+    verificarHerramientas(config, rutaMegui, necesariasEncode(salidas, { copiarAac: esAac(pista) }), "asu encode");
 
     // Destinos finales: se resuelven antes de codificar para no preguntar después de horas.
     mkdirSync(carpetaSalida, { recursive: true });

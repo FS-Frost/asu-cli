@@ -14,7 +14,16 @@ Solo Windows. Usa [Bun](https://bun.com) y [`@fs-frost/asu`](https://jsr.io/@fs-
 
 ## Instalación
 
-Requisitos: [Bun](https://bun.com) 1.4 o superior.
+Requisitos: [Bun](https://bun.com) 1.4 o superior. Algunas herramientas usan programas externos; solo hacen falta los de las que uses:
+
+| Programa | Lo usan | Cómo instalarlo |
+|---|---|---|
+| [MeGUI](https://sourceforge.net/projects/megui/) (ffmpeg, x264, mp4box, neroAacEnc, xvid_encraw, lame, AVI-Mux GUI) | `encode`, `comparar` | Instalarlo y `asu config megui "<carpeta>"` (se pregunta la primera vez) |
+| [AviSynth 2.60](https://sourceforge.net/projects/avisynth2/) de 32 bits + plugins ffms2 y VSFilter | `encode`, `comparar` | Instalarlo y copiar `ffms2.dll` y `VSFilter.dll` a su carpeta de plugins |
+| FFmpeg (ffprobe) | `corregir-offset` | `winget install Gyan.FFmpeg` |
+| [MKVToolNix](https://mkvtoolnix.download/) (mkvmerge, mkvextract), desde la 7.2 | `corregir-offset`, `mkv` | `winget install MoritzBunkus.MKVToolNix` |
+
+`asu herramientas` muestra cuáles están, dónde y en qué versión. Cada comando revisa las suyas antes de empezar y, si falta alguna, dice qué falta y cómo instalarla.
 
 ```powershell
 git clone https://github.com/FS-Frost/asu-cli.git asu-cli
@@ -39,7 +48,7 @@ bun unlink
 
 ### Menú contextual del Explorador (opcional)
 
-Agrega "Asu" al clic derecho sobre una carpeta y sobre el fondo de una carpeta abierta, con subopciones: Menú…, Encode, Comparar, Verificar fuentes, CRC, AVS de trabajo, AVS de compresión, Unir subtítulos y Corregir offset. Cada una abre Windows Terminal maximizado (o cmd si no está) en esa carpeta y ejecuta `asu`; al terminar, queda abierta una consola `cmd` en esa carpeta para seguir escribiendo comandos (de asu o cualquier otro; `exit` la cierra). "Comparar" abre el submenú Nueva comparación / Abrir una comparación. No pide administrador (escribe en `HKCU`).
+Agrega "Asu" al clic derecho sobre una carpeta y sobre el fondo de una carpeta abierta, con subopciones: Menú…, Encode, Comparar, Verificar fuentes, CRC, AVS de trabajo, AVS de compresión, Unir subtítulos, Corregir offset y Extraer de MKV. Cada una abre Windows Terminal maximizado (o cmd si no está) en esa carpeta y ejecuta `asu`; al terminar, queda abierta una consola `cmd` en esa carpeta para seguir escribiendo comandos (de asu o cualquier otro; `exit` la cierra). "Comparar" abre el submenú Nueva comparación / Abrir una comparación. No pide administrador (escribe en `HKCU`).
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\menu-contextual.ps1
@@ -62,6 +71,7 @@ asu reescalar [dir] -s a.ass -r 1920x1080   # crea "a - 1920x1080.ass"
 asu encode [dir]                      # encode completo del episodio
 asu comparar [dir]                    # prueba A/B de ajustes de x264
 asu crc [carpeta|archivo]             # calcula el CRC32 y lo compara con el del nombre
+asu mkv [dir]                         # extrae pistas y adjuntos de un MKV
 asu config preajustes                 # lista preajustes
 asu --help                            # ayuda general
 asu <comando> --help                  # ayuda de un comando
@@ -108,6 +118,39 @@ Para cada `.ass`, junta las fuentes usadas por las líneas `Dialogue`: las de lo
 La comparación ignora mayúsculas y el `@` de las fuentes verticales. Termina con código 1 si falta alguna fuente o algún `.ass` no se pudo leer.
 
 La primera ejecución lee todas las fuentes instaladas (unos segundos). Después usa un cache que solo vuelve a leer archivos nuevos o modificados.
+
+### herramientas
+
+```powershell
+asu herramientas
+```
+
+Muestra cada programa externo que usa asu, agrupado (MeGUI, AviSynth, FFmpeg, MKVToolNix): si está, su ruta y de dónde salió, su versión cuando la informa y, si falta, qué comandos la usan y dónde se buscó. Al final, cómo instalar lo que falta. Termina con código 1 si falta alguno. También está en el menú ("Revisar herramientas externas").
+
+Dónde se busca cada uno:
+
+- **MeGUI:** en `<carpeta de MeGUI>\tools` (`asu config megui`).
+- **AviSynth:** `C:\Windows\SysWOW64\avisynth.dll`, más `ffms2.dll` y `VSFilter.dll` en `C:\Program Files (x86)\AviSynth\plugins`. Si tus plugins están en otra carpeta: `asu config herramienta avisynth-plugins "<carpeta>"`. Se comprueba que estén los archivos, no que carguen.
+- **FFmpeg y MKVToolNix:** primero la carpeta configurada (`asu config herramienta ffmpeg|mkvtoolnix "<carpeta>"`), después el `PATH` y por último las ubicaciones típicas (`C:\ffmpeg\bin`, `C:\Program Files\MKVToolNix` y los accesos de WinGet).
+
+Cada comando revisa solo lo que va a usar, antes de empezar o de preguntar nada. Por ejemplo, el encode pide `neroAacEnc` solo si el audio del raw no es AAC (si es AAC, se copia), y `lame` solo si hay AVI. En el menú, las opciones a las que les falta algo muestran "falta …"; al elegirlas se explica qué instalar y se vuelve al menú. Si MeGUI aún no está configurado, no se bloquea: el comando lo pregunta.
+
+### mkv
+
+```powershell
+asu mkv [dir] [--video <archivo>] [--listar] [--pista <id>]... [--adjuntos] [-f|--forzar]
+```
+
+Extrae pistas (video, audio, subtítulos) y adjuntos (fuentes y otros) de **un** MKV de la carpeta (`.mkv`, `.mka`, `.mks` o `.webm`; si hay varios, se elige o se indica con `--video`). Usa `mkvextract` y `mkvmerge` de [MKVToolNix](https://mkvtoolnix.download/) (ver `asu herramientas`); funciona desde la 7.2. No usa ffmpeg porque al copiar un `.ass` lo reescribe y pierde partes, como `[Aegisub Project Garbage]`.
+
+- **Menú:** una lista con todas las pistas (`2 subs · ASS · eng · Signs`) y adjuntos (`adjunto 1 · Arial.ttf · 1021 KB`), sin nada marcado. Espacio marca, `a` todos, `n` ninguno, `i` invierte, Enter extrae.
+- **Por argumentos:** `--listar` muestra los IDs; `--pista <id>` se repite por pista y `--adjuntos` extrae todos los adjuntos. Sin terminal y sin elegir nada, es un error que muestra el contenido.
+- **Destino**, junto al MKV:
+  - pistas: `<nombre del mkv> - <id> <video|audio|subs> [<idioma>] [<nombre de pista>].<ext>`, por ejemplo `[G] Serie - 04 [1080p] - 2 subs eng Signs.ass`. La extensión sale del codec (`.h264`, `.h265`, `.aac`, `.flac`, `.ac3`, `.opus`, `.ass`, `.srt`, `.sup`…); el idioma `und` no se pone; los caracteres que Windows no admite pasan a `_`. Los subtítulos de texto salen en UTF-8.
+  - adjuntos: con su nombre original. Así `asu fuentes` y el encode ven las fuentes sin instalarlas.
+- **Si algo ya existe:** se pregunta una vez para todos (sobrescribir, saltar esos o cancelar); por argumentos, error salvo `-f`.
+- **Codecs que no reconoce:** se saltan con aviso, y termina con código 1.
+- No extrae capítulos, tags, timecodes ni cuesheet, y procesa un MKV por vez.
 
 ### crc
 
@@ -305,6 +348,7 @@ asu config salidas usar-variante 1080 anime                   # adopta una varia
 asu config variantes                                          # lista las variantes de x264
 asu config megui "C:\ruta\a\MeGUI"
 asu config carpeta-salida "C:\ruta\a\Encode"
+asu config herramienta mkvtoolnix "C:\ruta\a\MKVToolNix"        # también ffmpeg y avisynth-plugins; "" la quita
 asu config paralelo 3                                         # versiones a la vez en asu encode
 asu config restablecer                                        # preajustes y salidas de fábrica (conserva rutas)
 asu config ruta                                               # ruta de config.json
@@ -347,7 +391,7 @@ Los ajustes de x264 (incluido `extra`, una lista de argumentos adicionales, y `t
 
 Vive en `%USERPROFILE%\.asu-cli\`:
 
-- `config.json`: preajustes, salidas de encode, variantes de x264, carpeta de MeGUI, carpeta de salida, grupo, `paralelo` y `crcEnNombre`. Se crea al modificar algo; mientras no exista se usan los valores de fábrica, y las claves que falten se completan con ellos. Se puede editar a mano.
+- `config.json`: preajustes, salidas de encode, variantes de x264, carpeta de MeGUI, carpeta de salida, grupo, `paralelo`, `crcEnNombre` y `herramientas` (carpetas de FFmpeg, MKVToolNix y plugins de AviSynth, opcionales). Se crea al modificar algo; mientras no exista se usan los valores de fábrica, y las claves que falten se completan con ellos. Se puede editar a mano.
 - `cache-fuentes.json`: nombres de las fuentes instaladas. Se puede borrar sin problema; se reconstruye.
 
 ## Desarrollo
@@ -377,9 +421,10 @@ src/
   ui.ts             prompts (@clack/prompts) y errores
   lista-ordenable.ts  prompt propio de lista reordenable (@clack/core)
   lista-marcable.ts   prompt propio de lista para marcar con atajos a/n/c/i (@clack/core)
-  ejecutor.ts       ejecución de procesos y tuberías (encode), con vigilante de cuelgues
+  ejecutor.ts       ejecución de procesos y tuberías (encode, comparar, mkv), con vigilante de cuelgues
   registro.ts       registro de comandos (encode y comparar) y reintento ante cuelgues
   crc.ts            CRC32 de un archivo, leído por trozos
+  herramientas.ts   búsqueda de programas externos (MeGUI, AviSynth, PATH, ubicaciones típicas)
   servidor-comparacion.ts  servidor local de asu comparar (127.0.0.1 + token)
   comandos/         cada herramienta (I/O e interacción)
   nucleo/           lógica pura: generación de AVS, fuentes, unión y reescalado de .ass, nombres,

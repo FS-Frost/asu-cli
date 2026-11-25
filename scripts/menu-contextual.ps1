@@ -41,7 +41,8 @@ $entradas = @(
     @{ Nombre = 'AVS de trabajo';    Argumentos = 'avs-trabajo' },
     @{ Nombre = 'AVS de compresión'; Argumentos = 'avs-compresion' },
     @{ Nombre = 'Unir subtítulos';   Argumentos = 'unir' },
-    @{ Nombre = 'Corregir offset';   Argumentos = 'corregir-offset' }
+    @{ Nombre = 'Corregir offset';   Argumentos = 'corregir-offset' },
+    @{ Nombre = 'Extraer de MKV';    Argumentos = 'mkv' }
 )
 
 $carpetaAsu = if ($env:ASU_CLI_HOME) { $env:ASU_CLI_HOME } else { Join-Path $HOME '.asu-cli' }

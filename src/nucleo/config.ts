@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { validarNombreArchivo } from "./archivos.ts";
+import type { CarpetasHerramientas } from "./herramientas.ts";
 
 export type Preajuste = {
     nombre: string;
@@ -110,6 +111,8 @@ export type Config = {
     variantes: Variante[];
     /** Agrega el CRC32 del archivo al nombre final del encode: "… (HDTV 1920x1080) [ABCD1234].mp4". */
     crcEnNombre: boolean;
+    /** Carpetas de FFmpeg, MKVToolNix y plugins de AviSynth si no están en el PATH o en su lugar de fábrica. */
+    herramientas: CarpetasHerramientas;
 };
 
 export const PARALELO_DE_FABRICA = 3;
@@ -172,6 +175,7 @@ export function configDeFabrica(): Config {
         paralelo: PARALELO_DE_FABRICA,
         variantes: variantesDeFabrica(),
         crcEnNombre: true,
+        herramientas: {},
     };
 }
 
@@ -454,10 +458,23 @@ function validarConfig(datos: unknown): Config {
         paralelo: parcial.paralelo ?? fabrica.paralelo,
         variantes: parcial.variantes ?? fabrica.variantes,
         crcEnNombre: parcial.crcEnNombre ?? fabrica.crcEnNombre,
+        herramientas: parcial.herramientas ?? fabrica.herramientas,
     };
 
     if (typeof config.crcEnNombre !== "boolean") {
         throw new Error('"crcEnNombre" debe ser true o false.');
+    }
+
+    if (typeof config.herramientas !== "object" || config.herramientas === null || Array.isArray(config.herramientas)) {
+        throw new Error('"herramientas" debe ser un objeto: { "ffmpeg", "mkvtoolnix", "avisynthPlugins" }.');
+    }
+    for (const [clave, valor] of Object.entries(config.herramientas)) {
+        if (!["ffmpeg", "mkvtoolnix", "avisynthPlugins"].includes(clave)) {
+            throw new Error(`"herramientas.${clave}": clave desconocida (válidas: ffmpeg, mkvtoolnix, avisynthPlugins).`);
+        }
+        if (valor !== null && typeof valor !== "string") {
+            throw new Error(`"herramientas.${clave}" debe ser una carpeta o null.`);
+        }
     }
 
     if (!Array.isArray(config.variantes)) {

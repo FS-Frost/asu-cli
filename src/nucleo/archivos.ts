@@ -7,6 +7,9 @@ export const EXTENSIONES_VIDEO: readonly string[] = [
     ".m4v", ".mpg", ".rm", ".vob", ".ogm", ".m2ts",
 ];
 
+/** Contenedores Matroska que entiende mkvextract. */
+export const EXTENSIONES_MATROSKA: readonly string[] = [".mkv", ".mka", ".mks", ".webm"];
+
 export const EXTENSIONES_ASS: readonly string[] = [".ass"];
 
 export const EXTENSIONES_FUENTE: readonly string[] = [".ttf", ".otf", ".ttc", ".otc"];

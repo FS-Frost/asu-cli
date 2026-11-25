@@ -39,6 +39,7 @@ import {
     type Variante,
 } from "../nucleo/config.ts";
 import { argumentosTramo, comandoInfo, comandoMp4Video, comandosX264, herramientasDeMegui, parsearDuracion, type Comando, type Herramientas } from "../nucleo/encode.ts";
+import { NECESARIAS_COMPARAR } from "../nucleo/herramientas.ts";
 import { PanelAvance } from "../panel-avance.ts";
 import { Registro, anotarError, ejecutarVigilado, ejecutorConRegistro } from "../registro.ts";
 import { servirComparacion, type OpcionesServidor } from "../servidor-comparacion.ts";
@@ -480,8 +481,9 @@ async function compararConRegistro(opciones: OpcionesComparar, dependencias: Dep
     p.log.info(`Versión: ${etiquetaSalida(config, salida)} · variantes: ${variantes.map((v) => v.nombre).join(", ")}`);
 
     const recuerdo = await cargarRecuerdo(dir, config, { sinVersiones: true });
-    const h = herramientasDeMegui(await asegurarRutaMegui(config));
-    verificarHerramientas(h, [salida]);
+    const rutaMegui = await asegurarRutaMegui(config);
+    const h = herramientasDeMegui(rutaMegui);
+    verificarHerramientas(config, rutaMegui, NECESARIAS_COMPARAR, "asu comparar");
     const carpetaSalida = await asegurarCarpetaSalida(config, opciones.carpetaSalida);
 
     const video = await elegirVideo(dir, opciones.video);

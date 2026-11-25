@@ -26,7 +26,7 @@ import {
 } from "../src/nucleo/encode.ts";
 import { formatearCrc } from "../src/nucleo/nombres.ts";
 import { ErrorUsuario } from "../src/ui.ts";
-import { construirASS, directorioTemporal, escribirJson } from "./utilidades.ts";
+import { construirASS, directorioTemporal, escribirJson, simularAvisynth } from "./utilidades.ts";
 import { crc32 } from "node:zlib";
 
 const MEGUI = "C:\\MeGUI";
@@ -282,6 +282,7 @@ describe("asu encode (ejecutor falso)", () => {
         process.env.ASU_CLI_HOME = join(base, "home");
         process.env.ASU_CLI_DIRECTORIOS_FUENTES = "";
         process.env.ASU_CLI_NO_INTERACTIVO = "1";
+        simularAvisynth(base);
         falso = ejecutorFalso();
     });
 
@@ -556,6 +557,35 @@ describe("asu encode (ejecutor falso)", () => {
             falso.llamadas = [];
             expect(await correr({ reiniciar: true })).toBe(0);
             expect(llamadasCon("-c:a copy")).toHaveLength(1);
+        });
+
+        describe("herramientas necesarias", () => {
+            test("falta un plugin de AviSynth: error antes de codificar, con cómo instalarlo", async () => {
+                simularAvisynth(join(base, "avs-incompleto"), ["VSFilter.dll"]);
+                const error = (await correr().catch((e: unknown) => e)) as Error;
+                expect(error).toBeInstanceOf(ErrorUsuario);
+                expect(error.message).toContain("VSFilter.dll");
+                expect(error.message).toContain("asu config herramienta avisynth-plugins");
+                expect(error.message).toContain("asu herramientas");
+                expect(llamadasCon("x264.exe")).toHaveLength(0);
+            });
+
+            test("raw con AAC (se copia): neroAacEnc no hace falta", async () => {
+                rmSync(hReal.neroAac);
+                expect(await correr()).toBe(0);
+            });
+
+            test("raw sin AAC: falta neroAacEnc = error tras elegir la pista, antes de codificar", async () => {
+                rmSync(hReal.neroAac);
+                falso.infoRaw = INFO_RAW.replace("Audio: aac (LC)", "Audio: eac3");
+                await expect(correr()).rejects.toThrow("neroAacEnc.exe");
+                expect(llamadasCon("x264.exe")).toHaveLength(0);
+            });
+
+            test("solo MP4: lame no hace falta", async () => {
+                rmSync(hReal.lame);
+                expect(await correr({ solo: ["1080"] })).toBe(0);
+            });
         });
 
         test("raw sin AAC: se recodifica con neroAacEnc normalizado", async () => {

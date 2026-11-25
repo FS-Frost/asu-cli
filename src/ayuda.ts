@@ -11,6 +11,8 @@ Comandos:
   corregir-offset [dir]   Remuxea el video a MKV con el primer frame en 0 (como lo ve Aegisub).
   encode [dir]            Encode completo del episodio (MP4 1080, MP4 720, AVI 396...) con las herramientas de MeGUI.
   comparar [dir]          Prueba A/B de ajustes de x264: tramos codificados con cada variante y página para comparar.
+  herramientas            Revisa las herramientas externas (MeGUI, AviSynth, FFmpeg, MKVToolNix) y cómo instalarlas.
+  mkv [dir]               Extrae pistas (video, audio, subtítulos) y adjuntos (fuentes) de un MKV.
   crc [carpeta|archivo]   Calcula el CRC32 de archivos y lo compara con el del nombre ("… [ABCD1234].mp4").
   config <subcomando>     Administra preajustes, salidas de encode y rutas.
 
@@ -60,7 +62,45 @@ Termina con código 1 si falta alguna fuente o algún .ass no se pudo leer.
 Opciones:
   -h, --help              Muestra esta ayuda.`;
 
-export const AYUDA_CRC = `Uso: asu crc [carpeta | archivo]...
+export const AYUDA_HERRAMIENTAS = `Uso: asu herramientas
+
+Muestra cada herramienta externa que usa asu: si está, dónde (y de dónde salió), su versión
+cuando la informa y qué comandos la usan. Al final, cómo instalar lo que falta.
+
+- MeGUI (encode, comparar): en <carpeta de MeGUI>\\tools (asu config megui "<carpeta>").
+- AviSynth 2.60 de 32 bits (encode, comparar): C:\\Windows\\SysWOW64\\avisynth.dll y ffms2.dll y
+  VSFilter.dll en su carpeta de plugins (asu config herramienta avisynth-plugins "<carpeta>").
+- FFmpeg (ffprobe: corregir-offset) y MKVToolNix (mkvmerge, mkvextract: corregir-offset, mkv):
+  primero la carpeta configurada (asu config herramienta ffmpeg|mkvtoolnix "<carpeta>"), luego el
+  PATH, luego las ubicaciones típicas (C:\\ffmpeg\\bin, C:\\Program Files\\MKVToolNix, WinGet).
+
+Cada comando revisa solo lo que va a usar, antes de empezar; si falta algo, dice qué y cómo
+instalarlo. Termina con código 1 si falta alguna.
+
+Opciones:
+  -h, --help              Muestra esta ayuda.`;
+
+export const AYUDA_MKV =`Uso: asu mkv [dir] [opciones]
+
+Extrae pistas (video, audio, subtítulos) y adjuntos (fuentes...) de un MKV de la carpeta, con
+mkvextract (MKVToolNix, en el PATH; sirve desde la 7.2). Lo extraído queda junto al MKV:
+- pistas: "<nombre del mkv> - <id> <video|audio|subs> [<idioma>] [<nombre>].<ext>", con la
+  extensión del codec (.h264, .aac, .ass, .srt, .sup...). Los subtítulos de texto salen en UTF-8.
+- adjuntos: con su nombre original (así asu fuentes y el encode ven las fuentes).
+Codecs desconocidos se saltan con aviso. No extrae capítulos, tags ni timecodes.
+
+En el menú se eligen en una lista (nada marcado; espacio marca, a todos, n ninguno, i invertir).
+Si algo ya existe se pregunta una vez: sobrescribir, saltar esos o cancelar.
+
+Opciones:
+  --video <archivo>       MKV a usar (si hay varios: .mkv, .mka, .mks, .webm).
+  --listar                Muestra las pistas y adjuntos con sus IDs y termina.
+  --pista <id>            Pista a extraer (ID de --listar); repetir para varias.
+  --adjuntos              Extrae todos los adjuntos.
+  -f, --forzar            Sobrescribe los archivos que ya existan.
+  -h, --help              Muestra esta ayuda.`;
+
+export const AYUDA_CRC =`Uso: asu crc [carpeta | archivo]...
 
 "asu crc" solo, en una terminal, muestra los archivos de la carpeta actual (sin subcarpetas)
 con los que tienen CRC en el nombre ya marcados: Enter sin tocar nada = verificar la carpeta.
@@ -256,6 +296,8 @@ Subcomandos:
   variantes                                    Lista las variantes de x264 de asu comparar.
   megui <ruta>                                 Carpeta de instalación de MeGUI.
   carpeta-salida <ruta>                        Carpeta de los archivos finales de asu encode.
+  herramienta <nombre> <carpeta>               Carpeta de ffmpeg, mkvtoolnix o avisynth-plugins si no están
+                                               en el PATH ni en su lugar típico ("" la quita).
   paralelo <n>                                 Versiones que asu encode codifica a la vez (3 de fábrica).
   restablecer                                  Vuelve preajustes y salidas a los de fábrica.
   ruta                                         Muestra la ruta de config.json.

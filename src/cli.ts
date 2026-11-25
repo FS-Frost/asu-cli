@@ -12,6 +12,8 @@ import {
     AYUDA_ENCODE,
     AYUDA_FUENTES,
     AYUDA_GENERAL,
+    AYUDA_HERRAMIENTAS,
+    AYUDA_MKV,
     AYUDA_REESCALAR,
     AYUDA_UNIR,
 } from "./ayuda.ts";
@@ -35,6 +37,8 @@ import { abrirComparacion, comparar } from "./comandos/comparar.ts";
 import { corregirOffset } from "./comandos/corregir-offset.ts";
 import { elegirYRevisarCrc, verificarCrc } from "./comandos/crc.ts";
 import { encode } from "./comandos/encode.ts";
+import { configurarCarpetaHerramienta, diagnosticarHerramientas } from "./comandos/herramientas.ts";
+import { extraerMkv } from "./comandos/mkv.ts";
 import { reescalarArchivos } from "./comandos/reescalar.ts";
 import { unirArchivos } from "./comandos/unir.ts";
 import { verificarFuentes } from "./comandos/verificar-fuentes.ts";
@@ -93,6 +97,10 @@ function comandoConfig(args: string[]): number {
 
     if (sub === "carpeta-salida" && positionals.length === 2) {
         return configurarCarpetaSalida(accion!);
+    }
+
+    if (sub === "herramienta" && positionals.length === 3) {
+        return configurarCarpetaHerramienta(accion!, resto[0]!);
     }
 
     if (sub === "variantes" && positionals.length === 1) {
@@ -200,6 +208,39 @@ async function ejecutar(argv: string[]): Promise<number> {
             }
 
             return verificarCrc({ rutas: positionals });
+        }
+
+        case "herramientas": {
+            const { values, positionals } = parsear(comando, args, {});
+            if (values.help) {
+                return ayuda(AYUDA_HERRAMIENTAS);
+            }
+            if (positionals.length > 0) {
+                throw new ErrorUsuario(`Demasiados argumentos: ${positionals.join(" ")}\nUsa "asu herramientas --help".`);
+            }
+            return diagnosticarHerramientas();
+        }
+
+        case "mkv": {
+            const { values, positionals } = parsear(comando, args, {
+                video: { type: "string" },
+                pista: { type: "string", multiple: true },
+                adjuntos: { type: "boolean" },
+                listar: { type: "boolean" },
+                forzar: { type: "boolean", short: "f" },
+            });
+            if (values.help) {
+                return ayuda(AYUDA_MKV);
+            }
+
+            return extraerMkv({
+                dir: directorioUnico(comando, positionals),
+                video: values.video,
+                pistas: values.pista,
+                adjuntos: values.adjuntos,
+                listar: values.listar,
+                forzar: values.forzar,
+            });
         }
 
         case "reescalar": {

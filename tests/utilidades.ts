@@ -86,6 +86,26 @@ export function directorioTemporal(): string {
     return mkdtempSync(join(tmpdir(), "asu-cli-test-"));
 }
 
+/**
+ * AviSynth ficticio dentro de `base` (avisynth.dll en un "SysWOW64" y ffms2.dll + VSFilter.dll en
+ * "plugins"), apuntado por `ASU_CLI_SYSWOW64` y `ASU_CLI_AVISYNTH_PLUGINS`, para que los tests no
+ * dependan del AviSynth de la máquina. Devuelve las carpetas. Restaurar `process.env` al terminar.
+ */
+export function simularAvisynth(base: string, sin: string[] = []): { sysWow64: string; plugins: string } {
+    const sysWow64 = join(base, "SysWOW64");
+    const plugins = join(base, "AviSynth", "plugins");
+    mkdirSync(sysWow64, { recursive: true });
+    mkdirSync(plugins, { recursive: true });
+    for (const [carpeta, archivo] of [[sysWow64, "avisynth.dll"], [plugins, "ffms2.dll"], [plugins, "VSFilter.dll"]] as const) {
+        if (!sin.includes(archivo)) {
+            writeFileSync(join(carpeta, archivo), "");
+        }
+    }
+    process.env.ASU_CLI_SYSWOW64 = sysWow64;
+    process.env.ASU_CLI_AVISYNTH_PLUGINS = plugins;
+    return { sysWow64, plugins };
+}
+
 /** Escribe un archivo creando las carpetas que falten (p. ej. `.asu\asu.json`). */
 export function escribirJson(ruta: string, texto: string): void {
     mkdirSync(dirname(ruta), { recursive: true });
